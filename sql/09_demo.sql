@@ -13,6 +13,8 @@
 -- script ends with ROLLBACK TO SAVEPOINT, so the database is exactly as
 -- it was before, and the demo can be run again and again.
 -- Errors printed in steps 2-5 are EXPECTED - they are the demo.
+-- The script pauses ("Press Enter to continue...") after every scenario and
+-- clears the screen before each STEP, so it is meant to be run interactively.
 --
 -- Usage:  SQL> @09_demo.sql      (run after 00-07, e.g. via run_all.sql)
 -- =====================================================================
@@ -62,6 +64,8 @@ PROMPT #####################################################################
 -- everything below can be undone with one ROLLBACK at the end
 SAVEPOINT demo_start;
 
+CLEAR SCREEN
+
 -- =====================================================================
 PROMPT
 PROMPT =====================================================================
@@ -87,6 +91,9 @@ SELECT calculate_fare(1, 'BUSINESS')            AS business_fare,
        ROUND(5800 * 2.5, 2)                     AS base_x_2_5,
        calculate_fare(13, 'ECONOMY')            AS economy_fare
   FROM dual;
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT
@@ -127,6 +134,9 @@ SELECT log_id, booking_id, action, old_status, new_status
   FROM booking_audit_log
  WHERE booking_id = :g_booking
  ORDER BY log_id;
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT
@@ -137,6 +147,7 @@ PROMPT 2a) A raw INSERT for the seat that was just sold. Expect ORA-20102 from t
 PROMPT     trg_bookings_no_double_booking (the procedure is bypassed, the trigger still protects).
 INSERT INTO bookings (passenger_id, seat_id, status)
 VALUES (17, (SELECT seat_id FROM seats WHERE flight_id = 2 AND seat_no = '1B'), 'CONFIRMED');
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 2b) The same attempt through book_ticket. Expect ORA-20004 (checked before any insert).
@@ -149,6 +160,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected by book_ticket -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 2c) Passenger 16 already holds 1B on flight 2 and now asks for a second seat, 10D.
@@ -163,6 +175,9 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected by trigger -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT
@@ -188,6 +203,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Payment failure -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 3b) An unknown payment method is rejected by the CHECK constraint on payments
@@ -202,6 +218,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Constraint failure -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT After: nothing changed - no orphan booking, no payment, seat still AVAILABLE.
@@ -209,6 +226,9 @@ SELECT (SELECT COUNT(*) FROM bookings)  AS total_bookings,
        (SELECT COUNT(*) FROM payments)  AS total_payments,
        (SELECT status FROM seats WHERE flight_id = 2 AND seat_no = '10D') AS seat_status
   FROM dual;
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT
@@ -243,6 +263,7 @@ SELECT log_id, booking_id, action, old_status, new_status
   FROM booking_audit_log
  WHERE booking_id = :g_booking
  ORDER BY log_id;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 4b) Cancelling it a second time. Expect ORA-20009.
@@ -255,6 +276,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 4c) 50 percent tier: book and cancel a seat on flight 10 (leaves in about 2 days).
@@ -269,6 +291,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 4d) 10 percent tier: seeded booking 13 is on flight 13, which leaves about 20 hours
@@ -283,6 +306,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 4e) Booking 14 is on flight 14, which has already departed. Expect ORA-20010.
@@ -295,6 +319,7 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 4f) A booking that does not exist. Expect ORA-20008.
@@ -307,6 +332,9 @@ EXCEPTION
     DBMS_OUTPUT.PUT_LINE('Rejected -> ' || SQLERRM);
 END;
 /
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT
@@ -317,42 +345,50 @@ PROMPT =====================================================================
 PROMPT 5a) UNIQUE: a second passenger with an existing e-mail. Expect ORA-00001.
 INSERT INTO passengers (first_name, last_name, email, phone, date_of_birth, gender)
 VALUES ('Test', 'Duplicate', 'aarav.sharma@example.com', '9000000001', DATE '2000-01-01', 'M');
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5b) CHECK: a seat class that does not exist. Expect ORA-02290.
 INSERT INTO seats (flight_id, seat_no, seat_class)
 VALUES (2, '20A', 'LUXURY');
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5c) NOT NULL: a passenger without a first name. Expect ORA-01400.
 INSERT INTO passengers (first_name, last_name, email, phone, date_of_birth, gender)
 VALUES (NULL, 'Nameless', 'nameless@example.com', '9000000002', DATE '2000-01-01', 'F');
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5d) FOREIGN KEY: a booking for a passenger that does not exist. Expect ORA-02291.
 INSERT INTO bookings (passenger_id, seat_id, status)
 VALUES (9999, (SELECT seat_id FROM seats WHERE flight_id = 2 AND seat_no = '1A'), 'CONFIRMED');
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5e) TRIGGER: a flight that lands before it takes off. Expect ORA-20101.
 INSERT INTO flights (flight_no, airline_id, origin_airport_id, dest_airport_id,
                      departure_time, arrival_time, base_fare)
 VALUES ('AI-999', 1, 1, 2, SYSDATE + 10, SYSDATE + 9, 5000);
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5f) CHECK: a flight from an airport to itself. Expect ORA-02290 (ck_flights_route).
 INSERT INTO flights (flight_no, airline_id, origin_airport_id, dest_airport_id,
                      departure_time, arrival_time, base_fare)
 VALUES ('AI-998', 1, 1, 1, SYSDATE + 10, SYSDATE + 11, 5000);
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5g) NO ACTION: an airport that flights still use cannot be deleted. Expect ORA-02292.
 DELETE FROM airports WHERE airport_id = 1;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5h) NO ACTION on bookings.seat_id: flight 1 has bookings, so deleting it (which would
 PROMPT     cascade to its seats) is refused. Expect ORA-02292 (fk_bookings_seat).
 DELETE FROM flights WHERE flight_id = 1;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5i) ON DELETE SET NULL: flight 12 is operated by aircraft 15. Deleting the aircraft
@@ -360,6 +396,7 @@ PROMPT     keeps the flight and clears its aircraft_id.
 SELECT flight_no, aircraft_id FROM flights WHERE flight_id = 12;
 DELETE FROM aircraft WHERE aircraft_id = 15;
 SELECT flight_no, aircraft_id FROM flights WHERE flight_id = 12;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 5j) ON DELETE CASCADE: deleting passenger 15 removes their booking and its payment;
@@ -379,6 +416,9 @@ SELECT (SELECT COUNT(*) FROM bookings WHERE passenger_id = 15) AS total_bookings
 SELECT log_id, booking_id, action, old_status, new_status
   FROM booking_audit_log
  WHERE action = 'DELETE';
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT
@@ -387,6 +427,7 @@ PROMPT STEP 6 - Reports
 PROMPT =====================================================================
 PROMPT 6a) show_passenger_bookings (explicit cursor + DBMS_OUTPUT) for passenger 16:
 EXEC show_passenger_bookings(16)
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 6b) The complete audit trail of this demo session:
@@ -394,6 +435,7 @@ SELECT log_id, booking_id, action, old_status, new_status
   FROM booking_audit_log
  WHERE log_id >= (SELECT MIN(log_id) FROM booking_audit_log WHERE booking_id = :g_booking)
  ORDER BY log_id;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 6c) View available_seats for flight 2 (what a customer could still book):
@@ -401,6 +443,7 @@ SELECT flight_no, origin, destination, seat_no, seat_class
   FROM available_seats
  WHERE flight_id = 2
  ORDER BY seat_id;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 6d) View airline_revenue (top 5 by net revenue) reflects the refunds just issued:
@@ -410,12 +453,16 @@ SELECT *
           FROM airline_revenue
          ORDER BY net_revenue DESC)
  WHERE ROWNUM <= 5;
+PAUSE Press Enter to continue...
 
 PROMPT
 PROMPT 6e) The same API through the package reservation_pkg:
 SELECT reservation_pkg.seats_left(2)               AS seats_left,
        reservation_pkg.calculate_fare(2, 'BUSINESS') AS business_fare
   FROM dual;
+PAUSE Press Enter to continue...
+
+CLEAR SCREEN
 
 -- =====================================================================
 PROMPT

@@ -277,8 +277,8 @@ SIN are arrival-only) are the most instructive.*
 
 ### Say — the end-to-end demo
 
-Run it with paging so you can narrate: `SET PAUSE ON` then `@sql/09_demo.sql` (press Enter to advance; `SET PAUSE OFF`
-afterwards). Or paste one STEP at a time from the file.
+The script pauses after every scenario ("Press Enter to continue...") and clears the screen before each STEP, so just run
+`@sql/09_demo.sql` and press Enter to advance while you narrate. (Do not use `SET PAUSE ON` as well - it would double the pauses.)
 
 > "Everything in this demo runs inside one transaction, and at the end we roll it all back, so we can repeat it."
 
