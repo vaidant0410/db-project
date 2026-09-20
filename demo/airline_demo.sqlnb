@@ -1,0 +1,190 @@
+cells:
+  - kind: 1
+    value: "# The Airline Ticket System\n\nThink of a **magic ticket counter for airplanes**. You say who wants to fly, and it picks the seat, takes the money and writes everything down. And it has rules that nobody can break.\n\nAll the clever parts live inside a **database** (Oracle). A database is like a giant, very tidy notebook that never forgets.\n\n**How to use this page:** press the run button on a box (or **Ctrl+Alt+Enter**) and read what comes out. Every box cleans up after itself, so you can press any box, in any order, as many times as you like."
+    languageId: markdown
+  - kind: 1
+    value: "**Is everything ready?** Press the box below. It should say **READY**.\n\nIf it says anything else, open a terminal in the project folder and run this (about 5 seconds), then press the box again:\n\n`docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh`"
+    languageId: markdown
+  - kind: 2
+    value: "-- Is the sample data fresh, and exactly as we loaded it?\nSELECT CASE\n         WHEN (SELECT COUNT(*) FROM bookings) <> 18\n           THEN 'CHANGED - a run left changes behind. Reset the data.'\n         WHEN departure_time > SYSDATE + 2/24 AND departure_time < SYSDATE + 1\n           THEN 'READY'\n         ELSE 'STALE - flight dates have moved on. Reset the data.'\n       END                                             AS status,\n       ROUND((departure_time - SYSDATE) * 24, 1)       AS hours_until_flight_13_leaves,\n       (SELECT COUNT(*) FROM bookings)                 AS bookings_now\n  FROM flights\n WHERE flight_id = 13;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "# 1. Watch it work\n\nWe will book a ticket, try to cheat, break things on purpose, and see what the database does. Whenever you see **The database said NO**, that is good news: the rules are working."
+    languageId: markdown
+  - kind: 1
+    value: "## Book a ticket\nNikhil wants a **business seat** on flight 2 (Mumbai to Bengaluru). We ask the database to book it with **one command**. Then we look at what happened.\n\nLook for three things: the **ticket**, the **seat that is now taken**, and a line in the database's **diary** saying who did what.\n\n*Technical terms: stored procedure `book_ticket`, views, triggers, audit log.*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\n-- Nikhil (passenger 16) books seat 1B, business class, on flight 2, and pays by UPI.\nDECLARE\n  v_booking bookings.booking_id%TYPE;\nBEGIN\n  book_ticket(p_passenger_id => 16,\n              p_flight_id    => 2,\n              p_seat_no      => '1B',\n              p_method       => 'UPI',\n              p_booking_id   => v_booking);\n  DBMS_OUTPUT.PUT_LINE('Booking created: number ' || v_booking);\nEND;\n/\n-- 1) The ticket, as Nikhil sees it:\nSELECT booking_id, passenger_name, flight_no, seat_no, seat_class,\n       booking_status, amount_paid, payment_status\n  FROM passenger_itinerary\n WHERE booking_id = (SELECT MAX(booking_id) FROM bookings);\n-- 2) The seat is now taken, so one seat fewer is left:\nSELECT seat_no, status AS seat_status, seats_left(2) AS seats_left\n  FROM seats\n WHERE flight_id = 2 AND seat_no = '1B';\n-- 3) The diary line the database wrote all by itself:\nSELECT log_id, booking_id, action, old_status, new_status\n  FROM booking_audit_log\n WHERE booking_id = (SELECT MAX(booking_id) FROM bookings)\n ORDER BY log_id;\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Nobody can steal a seat\nNikhil now has seat 1B. A different person tries to take **the same seat**, two ways: through the **front door** (the normal way) and through the **back door** (typing the data in directly, skipping our rules).\n\nThe database says **no** both times.\n\n*Technical terms: stored procedure check, trigger `trg_bookings_no_double_booking`.*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\nDECLARE\n  v_booking bookings.booking_id%TYPE;\n  v_other   bookings.booking_id%TYPE;\nBEGIN\n  -- Nikhil books seat 1B\n  book_ticket(16, 2, '1B', 'UPI', v_booking);\n\n  -- Front door: passenger 17 asks for the same seat the normal way\n  BEGIN\n    book_ticket(17, 2, '1B', 'CARD', v_other);\n    DBMS_OUTPUT.PUT_LINE('OOPS - the front door should have been stopped');\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('Front door: The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\n  END;\n\n  -- Back door: passenger 17 types the booking in directly\n  BEGIN\n    INSERT INTO bookings (passenger_id, seat_id, status)\n    VALUES (17, (SELECT seat_id FROM seats WHERE flight_id = 2 AND seat_no = '1B'), 'CONFIRMED');\n    DBMS_OUTPUT.PUT_LINE('OOPS - the back door should have been stopped');\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('Back door : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\n  END;\nEND;\n/\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## One seat per person\nNikhil already has a seat on this flight. Now he asks for a **second** one. The database says no: **one seat per person per flight**.\n\n*Technical term: compound trigger `trg_bookings_one_per_flight`. It counts bookings after the statement finishes, which avoids the classic \"mutating table\" error (ORA-04091).*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\nDECLARE\n  v_booking bookings.booking_id%TYPE;\n  v_second  bookings.booking_id%TYPE;\nBEGIN\n  -- Nikhil (passenger 16) books seat 1B\n  book_ticket(16, 2, '1B', 'UPI', v_booking);\n  -- ...and now asks for a second seat, 10D, on the same flight\n  BEGIN\n    book_ticket(16, 2, '10D', 'CARD', v_second);\n    DBMS_OUTPUT.PUT_LINE('OOPS - a second seat should have been stopped');\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\n  END;\nEND;\n/\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## If something goes wrong, nothing is left half-done\nBooking has two steps: **write down the booking**, then **take the money**. What if the payment fails halfway?\n\nThe database has an **undo button**. It undoes the first step too. Watch the numbers: they are exactly the same before and after.\n\n*Technical terms: SAVEPOINT and ROLLBACK (atomicity).*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\n-- BEFORE: how many bookings and payments, and is seat 10D free?\nSELECT (SELECT COUNT(*) FROM bookings) AS total_bookings,\n       (SELECT COUNT(*) FROM payments) AS total_payments,\n       (SELECT status FROM seats WHERE flight_id = 2 AND seat_no = '10D') AS seat_10d\n  FROM dual;\n\n-- Try 1: the passenger pays INR 100 for a 4,200 seat. The booking is written first,\n-- then the payment is declined, and the database undoes the booking.\nDECLARE\n  v_booking bookings.booking_id%TYPE;\nBEGIN\n  book_ticket(p_passenger_id => 17, p_flight_id => 2, p_seat_no => '10D',\n              p_method => 'CARD', p_booking_id => v_booking, p_amount_paid => 100);\n  DBMS_OUTPUT.PUT_LINE('OOPS - the payment should have been declined');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Payment too small: The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n\n-- Try 2: the passenger pays with a made-up method (\"BITCOIN\"). Also undone.\nDECLARE\n  v_booking bookings.booking_id%TYPE;\nBEGIN\n  book_ticket(p_passenger_id => 17, p_flight_id => 2, p_seat_no => '10D',\n              p_method => 'BITCOIN', p_booking_id => v_booking);\n  DBMS_OUTPUT.PUT_LINE('OOPS - BITCOIN should have been refused');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Made-up payment method: The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n\n-- AFTER: nothing changed. No half-made booking, no payment, the seat is still free.\nSELECT (SELECT COUNT(*) FROM bookings) AS total_bookings,\n       (SELECT COUNT(*) FROM payments) AS total_payments,\n       (SELECT status FROM seats WHERE flight_id = 2 AND seat_no = '10D') AS seat_10d\n  FROM dual;\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Cancel and get money back\nNikhil changes his mind. The database cancels the ticket, gives **90 percent of the money back** (the flight is days away), frees the seat, and writes it in the diary.\n\n*Technical terms: stored procedure `cancel_booking`, triggers, OUT parameter.*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\n-- Nikhil books seat 1B and then cancels it. Flight 2 leaves in about 5 days.\nDECLARE\n  v_booking bookings.booking_id%TYPE;\n  v_refund  payments.refund_amount%TYPE;\nBEGIN\n  book_ticket(16, 2, '1B', 'UPI', v_booking);\n  cancel_booking(v_booking, v_refund);\n  DBMS_OUTPUT.PUT_LINE('Money handed back to Nikhil: INR ' || v_refund);\nEND;\n/\n-- The ticket is now CANCELLED and the payment is REFUNDED:\nSELECT booking_id, passenger_name, seat_no, booking_status, amount_paid,\n       refund_amount, payment_status\n  FROM passenger_itinerary\n WHERE booking_id = (SELECT MAX(booking_id) FROM bookings);\n-- The seat is free again:\nSELECT seat_no, status AS seat_status, seats_left(2) AS seats_left\n  FROM seats\n WHERE flight_id = 2 AND seat_no = '1B';\n-- The diary shows the booking, then the cancellation:\nSELECT log_id, booking_id, action, old_status, new_status\n  FROM booking_audit_log\n WHERE booking_id = (SELECT MAX(booking_id) FROM bookings)\n ORDER BY log_id;\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Cancel later, get less back\nThe closer the plane is to take-off, the less money you get back:\n\n| Time before take-off | Money back |\n|---|---|\n| 3 days or more | **90 percent** |\n| 1 to 3 days | **50 percent** |\n| less than 1 day | **10 percent** |\n| plane already left | nothing (cancelling is refused) |\n\nBelow: a flight that leaves in about 2 days (50 percent), and one that leaves within a day (10 percent)."
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\nDECLARE\n  v_booking bookings.booking_id%TYPE;\n  v_refund  payments.refund_amount%TYPE;\nBEGIN\n  -- Flight 10 leaves in about 2 days: book a seat and cancel it (50 percent back)\n  book_ticket(16, 10, '10A', 'CARD', v_booking);\n  cancel_booking(v_booking, v_refund);\n  -- Flight 13 leaves within a day: cancel the seat that is already booked (10 percent back)\n  BEGIN\n    cancel_booking(13, v_refund);\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('Could not cancel booking 13 -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1) || '  (if that flight has left, reset the data)');\n  END;\nEND;\n/\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Cancelling things that cannot be cancelled\nThree silly attempts. The database refuses each one and says why: cancelling **twice**, cancelling a flight that **already left**, and cancelling a ticket that **does not exist**."
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\nDECLARE\n  v_booking bookings.booking_id%TYPE;\n  v_refund  payments.refund_amount%TYPE;\nBEGIN\n  -- Cancelling the same booking twice\n  book_ticket(16, 2, '1B', 'UPI', v_booking);\n  cancel_booking(v_booking, v_refund);\n  BEGIN\n    cancel_booking(v_booking, v_refund);\n    DBMS_OUTPUT.PUT_LINE('OOPS - cancelling twice should have been stopped');\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('Cancel twice          : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\n  END;\n  -- A flight that has already left (booking 14)\n  BEGIN\n    cancel_booking(14, v_refund);\n    DBMS_OUTPUT.PUT_LINE('OOPS - a departed flight should have been stopped');\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('Flight already left   : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\n  END;\n  -- A ticket that does not exist (booking 99999)\n  BEGIN\n    cancel_booking(99999, v_refund);\n    DBMS_OUTPUT.PUT_LINE('OOPS - a missing booking should have been stopped');\n  EXCEPTION\n    WHEN OTHERS THEN\n      DBMS_OUTPUT.PUT_LINE('Ticket does not exist : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\n  END;\nEND;\n/\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Bad data bounces off\nThe database checks everything that goes in. Six bad things below, and each one is refused: the **same e-mail twice**, a **seat class that does not exist**, a passenger **with no first name**, a booking for a **person who does not exist**, a flight that **lands before it takes off**, and a flight **from an airport to itself**.\n\n*Technical terms: UNIQUE, CHECK, NOT NULL and FOREIGN KEY constraints, and a trigger.*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\n-- 1) The same e-mail twice\nBEGIN\n  INSERT INTO passengers (first_name, last_name, email, phone, date_of_birth, gender)\n  VALUES ('Test', 'Duplicate', 'aarav.sharma@example.com', '9000000001', DATE '2000-01-01', 'M');\n  DBMS_OUTPUT.PUT_LINE('OOPS - a duplicate e-mail should have been stopped');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Same e-mail twice       : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n-- 2) A seat class that does not exist\nBEGIN\n  INSERT INTO seats (flight_id, seat_no, seat_class)\n  VALUES (2, '20A', 'LUXURY');\n  DBMS_OUTPUT.PUT_LINE('OOPS - LUXURY should have been stopped');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Made-up seat class      : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n-- 3) A passenger with no first name\nBEGIN\n  INSERT INTO passengers (first_name, last_name, email, phone, date_of_birth, gender)\n  VALUES (NULL, 'Nameless', 'nameless@example.com', '9000000002', DATE '2000-01-01', 'F');\n  DBMS_OUTPUT.PUT_LINE('OOPS - a missing name should have been stopped');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('No first name           : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n-- 4) A booking for a passenger who does not exist\nBEGIN\n  INSERT INTO bookings (passenger_id, seat_id, status)\n  VALUES (9999, (SELECT seat_id FROM seats WHERE flight_id = 2 AND seat_no = '1A'), 'CONFIRMED');\n  DBMS_OUTPUT.PUT_LINE('OOPS - a missing passenger should have been stopped');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Passenger not found     : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n-- 5) A flight that lands before it takes off\nBEGIN\n  INSERT INTO flights (flight_no, airline_id, origin_airport_id, dest_airport_id,\n                       departure_time, arrival_time, base_fare)\n  VALUES ('AI-999', 1, 1, 2, SYSDATE + 10, SYSDATE + 9, 5000);\n  DBMS_OUTPUT.PUT_LINE('OOPS - landing before take-off should have been stopped');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Lands before take-off   : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n-- 6) A flight from an airport to itself\nBEGIN\n  INSERT INTO flights (flight_no, airline_id, origin_airport_id, dest_airport_id,\n                       departure_time, arrival_time, base_fare)\n  VALUES ('AI-998', 1, 1, 1, SYSDATE + 10, SYSDATE + 11, 5000);\n  DBMS_OUTPUT.PUT_LINE('OOPS - a flight to itself should have been stopped');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Airport to itself       : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Deleting things safely\nDeleting one thing can affect other things. The database has three different rules, and we will see each one:\n\n1. **Protect it:** an airport that flights still use cannot be deleted.\n2. **Keep it, forget the link:** delete a plane and the flight stays; it just no longer says which plane.\n3. **Delete the related things too:** delete a passenger and their ticket goes with them.\n\n*Technical terms: NO ACTION, ON DELETE SET NULL, ON DELETE CASCADE.*"
+    languageId: markdown
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\nSET SERVEROUTPUT ON\n-- Rule 1 - protect it: an airport that flights still use...\nBEGIN\n  DELETE FROM airports WHERE airport_id = 1;\n  DBMS_OUTPUT.PUT_LINE('OOPS - the airport should have been protected');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Airport in use          : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\n-- ...and a flight that already has bookings.\nBEGIN\n  DELETE FROM flights WHERE flight_id = 1;\n  DBMS_OUTPUT.PUT_LINE('OOPS - the flight should have been protected');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('Flight has bookings     : The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\n-- Rule 2 - keep it, forget the link: flight 12 is flown by aircraft 15.\n-- Before: the flight names its aircraft.\nSELECT flight_no, aircraft_id FROM flights WHERE flight_id = 12;\nDELETE FROM aircraft WHERE aircraft_id = 15;\n-- After: the flight is still here, but the aircraft is now empty.\nSELECT flight_no, aircraft_id FROM flights WHERE flight_id = 12;\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "SET AUTOCOMMIT OFF\n-- Rule 3 - delete the related things too: passenger 15 has a booking and a payment.\n-- Before:\nSELECT (SELECT COUNT(*) FROM bookings WHERE passenger_id = 15) AS total_bookings,\n       (SELECT COUNT(*) FROM payments WHERE booking_id = 15)   AS total_payments,\n       (SELECT status FROM seats WHERE seat_id = 144)          AS seat_status\n  FROM dual;\n\nDELETE FROM passengers WHERE passenger_id = 15;\n\n-- After: the booking and payment are gone, the seat is free again...\nSELECT (SELECT COUNT(*) FROM bookings WHERE passenger_id = 15) AS total_bookings,\n       (SELECT COUNT(*) FROM payments WHERE booking_id = 15)   AS total_payments,\n       (SELECT status FROM seats WHERE seat_id = 144)          AS seat_status\n  FROM dual;\n\n-- ...and the diary noted it.\nSELECT log_id, booking_id, action, old_status, new_status\n  FROM booking_audit_log\n WHERE action = 'DELETE';\nROLLBACK;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "# 2. Ask it questions\nA database answers questions. Each box below asks one. The first line says the question in plain words, and the technical name of the trick is in brackets."
+    languageId: markdown
+  - kind: 2
+    value: "-- Question 1: Which flights can I still book?   (INNER JOIN)\nSELECT f.flight_no,\n       al.airline_name,\n       ao.iata_code                                     AS origin,\n       ad.iata_code                                     AS destination,\n       TO_CHAR(f.departure_time, 'DD-Mon-YYYY HH24:MI') AS departs,\n       f.base_fare,\n       f.status                                         AS flight_status\n  FROM flights f\n  JOIN airlines al ON al.airline_id = f.airline_id\n  JOIN airports ao ON ao.airport_id = f.origin_airport_id\n  JOIN airports ad ON ad.airport_id = f.dest_airport_id\n WHERE f.status IN ('SCHEDULED', 'DELAYED')\n ORDER BY f.departure_time;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 2: Who booked which seat, and how much did they pay?   (INNER JOIN of five tables)\nSELECT b.booking_id,\n       p.first_name || ' ' || p.last_name AS passenger_name,\n       f.flight_no,\n       s.seat_no,\n       s.seat_class,\n       pay.amount,\n       pay.payment_method\n  FROM bookings   b\n  JOIN passengers p   ON p.passenger_id = b.passenger_id\n  JOIN seats      s   ON s.seat_id      = b.seat_id\n  JOIN flights    f   ON f.flight_id    = s.flight_id\n  JOIN payments   pay ON pay.booking_id = b.booking_id\n WHERE b.status = 'CONFIRMED'\n ORDER BY b.booking_id;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 3: How many flights does each airline have? Airlines with none still count as 0.\n-- (LEFT OUTER JOIN)  Look for Lufthansa at the bottom.\nSELECT al.airline_name,\n       COUNT(f.flight_id) AS flights_operated\n  FROM airlines al\n  LEFT OUTER JOIN flights f ON f.airline_id = al.airline_id\n GROUP BY al.airline_name\n ORDER BY flights_operated DESC, al.airline_name;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 4: Which aircraft have no flight at the moment?   (RIGHT OUTER JOIN)\nSELECT ac.registration_no,\n       ac.aircraft_model,\n       ac.status AS aircraft_status\n  FROM flights f\n RIGHT OUTER JOIN aircraft ac ON ac.aircraft_id = f.aircraft_id\n WHERE f.flight_id IS NULL\n ORDER BY ac.registration_no;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 5: Who works on which flight? People with no flight yet say 'not rostered'.\n-- (FULL OUTER JOIN)\nSELECT c.full_name,\n       c.crew_role,\n       NVL(TO_CHAR(fc.flight_id), 'not rostered') AS rostered_flight\n  FROM crew c\n  FULL OUTER JOIN flight_crew fc ON fc.crew_id = c.crew_id\n ORDER BY fc.flight_id, c.crew_id;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 6: How much money came in for each way of paying?   (GROUP BY and totals)\nSELECT payment_method,\n       COUNT(*)                          AS payments_made,\n       SUM(amount)                       AS gross_amount,\n       SUM(refund_amount)                AS refunded_amount,\n       SUM(amount) - SUM(refund_amount)  AS net_amount\n  FROM payments\n GROUP BY payment_method\n ORDER BY net_amount DESC;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 7: Which cities have at least 2 confirmed bookings?   (GROUP BY ... HAVING)\nSELECT ad.city AS destination_city,\n       COUNT(*) AS confirmed_bookings\n  FROM bookings b\n  JOIN seats    s  ON s.seat_id     = b.seat_id\n  JOIN flights  f  ON f.flight_id   = s.flight_id\n  JOIN airports ad ON ad.airport_id = f.dest_airport_id\n WHERE b.status = 'CONFIRMED'\n GROUP BY ad.city\nHAVING COUNT(*) >= 2\n ORDER BY confirmed_bookings DESC, ad.city;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 8: Which flights cost more than the average flight?   (a question inside a question)\nSELECT flight_no, base_fare\n  FROM flights\n WHERE base_fare > (SELECT AVG(base_fare) FROM flights)\n ORDER BY base_fare DESC;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 9: Who is sitting in Business or First class?   (subquery with IN)\nSELECT p.passenger_id,\n       p.first_name || ' ' || p.last_name AS passenger_name,\n       p.email\n  FROM passengers p\n WHERE p.passenger_id IN (SELECT b.passenger_id\n                            FROM bookings b\n                            JOIN seats s ON s.seat_id = b.seat_id\n                           WHERE b.status = 'CONFIRMED'\n                             AND s.seat_class IN ('BUSINESS', 'FIRST'))\n ORDER BY p.passenger_id;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 10: Which flights cost more than the average of THEIR OWN airline?\n-- (correlated subquery: the inner question is asked again for every flight)\nSELECT f.flight_no,\n       al.airline_name,\n       f.base_fare\n  FROM flights f\n  JOIN airlines al ON al.airline_id = f.airline_id\n WHERE f.base_fare > (SELECT AVG(f2.base_fare)\n                        FROM flights f2\n                       WHERE f2.airline_id = f.airline_id)\n ORDER BY al.airline_name, f.base_fare DESC;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 11: Who has cancelled a booking at least once?   (EXISTS)\nSELECT p.passenger_id,\n       p.first_name || ' ' || p.last_name AS passenger_name\n  FROM passengers p\n WHERE EXISTS (SELECT 1\n                 FROM bookings b\n                WHERE b.passenger_id = p.passenger_id\n                  AND b.status = 'CANCELLED')\n ORDER BY p.passenger_id;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 12: Which upcoming flights have no crew yet?   (NOT EXISTS)\nSELECT f.flight_no,\n       ao.iata_code                                     AS origin,\n       ad.iata_code                                     AS destination,\n       TO_CHAR(f.departure_time, 'DD-Mon-YYYY HH24:MI') AS departs\n  FROM flights f\n  JOIN airports ao ON ao.airport_id = f.origin_airport_id\n  JOIN airports ad ON ad.airport_id = f.dest_airport_id\n WHERE f.status IN ('SCHEDULED', 'DELAYED')\n   AND NOT EXISTS (SELECT 1\n                     FROM flight_crew fc\n                    WHERE fc.flight_id = f.flight_id)\n ORDER BY f.departure_time;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 13: Every city we fly from OR to, each listed once.   (UNION)\nSELECT ao.city AS city\n  FROM flights f\n  JOIN airports ao ON ao.airport_id = f.origin_airport_id\nUNION\nSELECT ad.city\n  FROM flights f\n  JOIN airports ad ON ad.airport_id = f.dest_airport_id\n ORDER BY city;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 14: Which airports are BOTH a place planes leave from AND arrive at?   (INTERSECT)\nSELECT a.iata_code AS airport_code, a.city\n  FROM airports a\n  JOIN flights f ON f.origin_airport_id = a.airport_id\nINTERSECT\nSELECT a.iata_code, a.city\n  FROM airports a\n  JOIN flights f ON f.dest_airport_id = a.airport_id\n ORDER BY 1;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Question 15: Which airports are only ever a place planes ARRIVE at?   (MINUS)\nSELECT a.iata_code AS airport_code, a.city\n  FROM airports a\n  JOIN flights f ON f.dest_airport_id = a.airport_id\nMINUS\nSELECT a.iata_code, a.city\n  FROM airports a\n  JOIN flights f ON f.origin_airport_id = a.airport_id\n ORDER BY 1;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "# 3. How it is built\nA peek under the hood. Everything you just saw is made from a few simple building blocks."
+    languageId: markdown
+  - kind: 1
+    value: "## Tables: the pages of the notebook\nEach **table** holds one kind of thing: airlines, airports, aircraft, flights, passengers, seats, bookings, payments and crew. One more table (`flight_crew`) links crew to flights, because one crew member works on many flights and one flight has many crew. The last one, `booking_audit_log`, is the diary.\n\nA booking does not store the flight. It stores the **seat**, and the seat knows its flight. So each fact is written down only once.\n\n*Technical terms: relational tables, junction table, third normal form.*"
+    languageId: markdown
+  - kind: 2
+    value: "-- How many rows (lines of information) are in each table\nSELECT 'airlines' AS table_name, COUNT(*) AS row_count FROM airlines\nUNION ALL SELECT 'airports',          COUNT(*) FROM airports\nUNION ALL SELECT 'aircraft',          COUNT(*) FROM aircraft\nUNION ALL SELECT 'flights',           COUNT(*) FROM flights\nUNION ALL SELECT 'passengers',        COUNT(*) FROM passengers\nUNION ALL SELECT 'seats',             COUNT(*) FROM seats\nUNION ALL SELECT 'bookings',          COUNT(*) FROM bookings\nUNION ALL SELECT 'payments',          COUNT(*) FROM payments\nUNION ALL SELECT 'crew',              COUNT(*) FROM crew\nUNION ALL SELECT 'flight_crew',       COUNT(*) FROM flight_crew\nUNION ALL SELECT 'booking_audit_log', COUNT(*) FROM booking_audit_log;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Rules: guards on the doors\nThe tables are connected by **links** (a booking points to a passenger and to a seat). For each link, a rule says what happens when the thing it points to is deleted: **CASCADE** (delete this too), **SET NULL** (keep this, forget the link) or **NO ACTION** (refuse). You saw all three above.\n\nThere is also one special guard: **only one confirmed booking per seat**, even if two people press the button at the same moment.\n\n*Technical terms: FOREIGN KEY delete rules, unique function-based index.*"
+    languageId: markdown
+  - kind: 2
+    value: "-- Every link between tables, and what happens when the thing it points to is deleted\nSELECT c.table_name      AS child_table,\n       r.table_name      AS parent_table,\n       c.delete_rule\n  FROM user_constraints c\n  JOIN user_constraints r ON r.constraint_name = c.r_constraint_name\n WHERE c.constraint_type = 'R'\n ORDER BY c.delete_rule, c.table_name, r.table_name;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- The special guard: one confirmed booking per seat\nSELECT index_name, uniqueness\n  FROM user_indexes\n WHERE index_name = 'UQ_BOOKINGS_ACTIVE_SEAT';"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Windows: three ways of looking at the data\nA **view** is a window that shows part of the data in a friendlier way. It stores nothing itself.\n\n- **available_seats:** the seats a customer can still book.\n- **passenger_itinerary:** one tidy line per ticket, gathered from seven tables.\n- **airline_revenue:** how much each airline earned. An airline with no bookings still appears, with zero."
+    languageId: markdown
+  - kind: 2
+    value: "-- Window 1: the seats still free on flight AI-101 (there is exactly one: 1B)\nSELECT flight_no, origin, destination, seat_no, seat_class, base_fare\n  FROM available_seats\n WHERE flight_id = 1;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Window 2: passenger 1's tickets (one CONFIRMED, one CANCELLED)\nSELECT booking_id, passenger_name, flight_no, seat_no, booking_status, amount_paid\n  FROM passenger_itinerary\n WHERE passenger_id = 1;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "-- Window 3: money earned by each airline (Lufthansa has no flights and shows zero)\nSELECT airline_name, total_bookings, confirmed_bookings,\n       gross_revenue, total_refunds, net_revenue\n  FROM airline_revenue\n ORDER BY net_revenue DESC, airline_name;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Calculators: functions\nA **function** takes something in and gives an answer back. **calculate_fare** works out the price: the flight's base fare times a seat-class multiplier (business is 2.5 times), plus **15 percent** if the flight is nearly full and **20 percent** if it leaves within 2 days. **seats_left** counts the free seats.\n\n*Technical terms: stored functions, used straight from SQL.*"
+    languageId: markdown
+  - kind: 2
+    value: "-- Flight 2: 4 seats left, business costs 10,500 (4,200 x 2.5)\n-- Flight 1: nearly full, so business costs 15 percent extra: 5,800 x 2.5 x 1.15 = 16,675\n-- Flight 13: leaves within 2 days, so economy costs 20 percent extra\nSELECT seats_left(2)                 AS seats_left_flight_2,\n       calculate_fare(2, 'BUSINESS') AS business_fare_flight_2,\n       calculate_fare(1, 'BUSINESS') AS business_fare_busy_flight_1,\n       calculate_fare(13, 'ECONOMY') AS economy_fare_last_minute_flight_13\n  FROM dual;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "SET SERVEROUTPUT ON\n-- A calculator can say \"that makes no sense\" in its own words: flight 999 does not exist.\nDECLARE\n  v_fare NUMBER;\nBEGIN\n  v_fare := calculate_fare(999, 'ECONOMY');\n  DBMS_OUTPUT.PUT_LINE('OOPS - flight 999 should not exist');\nEXCEPTION\n  WHEN OTHERS THEN\n    DBMS_OUTPUT.PUT_LINE('The database said NO -> ' || SUBSTR(SQLERRM, 1, INSTR(SQLERRM || CHR(10), CHR(10)) - 1));\nEND;\n/"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Recipes: procedures\nA **procedure** is a recipe with steps. **book_ticket** checks the passenger, the flight and the seat, **locks the seat** so two people cannot grab it at the same moment, works out the price, writes the booking and the payment, and marks the seat. If any step fails, it undoes all of them. **cancel_booking** follows the refund table you saw above. **show_passenger_bookings** walks through a passenger's tickets one by one and prints them.\n\n*Technical terms: stored procedures, SELECT ... FOR UPDATE, SAVEPOINT, explicit cursor.*"
+    languageId: markdown
+  - kind: 2
+    value: "-- Every function, procedure, package and trigger in the system, and whether it is healthy (VALID)\nSELECT object_type, object_name, status\n  FROM user_objects\n WHERE object_type IN ('FUNCTION', 'PROCEDURE', 'PACKAGE', 'PACKAGE BODY', 'TRIGGER')\n ORDER BY object_type, object_name;"
+    languageId: oracle-sql
+  - kind: 2
+    value: "SET SERVEROUTPUT ON\n-- show_passenger_bookings reads a passenger's tickets one at a time (an explicit cursor)\n-- and prints them, then adds up what the passenger really spent after refunds.\nBEGIN\n  show_passenger_bookings(1);\nEND;\n/"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Toolbox: a package\nA **package** puts related tools in one box with one name. `reservation_pkg` holds the same calculators and recipes. The outside of the box (the specification) shows what you can use; the inside (the body) keeps the details private."
+    languageId: markdown
+  - kind: 2
+    value: "-- The same answers, taken from the toolbox instead of loose tools\nSELECT reservation_pkg.seats_left(2)                 AS seats_left,\n       reservation_pkg.calculate_fare(2, 'BUSINESS') AS business_fare\n  FROM dual;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "## Automatic helpers: triggers\nA **trigger** is a helper that wakes up by itself whenever something changes. There are five. One checks that a flight takes off before it lands. One stops double bookings. One keeps the seat's \"taken\" or \"free\" label right. One writes the diary. And one (the **compound trigger**) makes sure a person holds only one seat per flight.\n\nThey protect the data even when someone skips our recipes and types straight into the tables."
+    languageId: markdown
+  - kind: 2
+    value: "-- The five automatic helpers (all VALID). Note the one marked COMPOUND.\nSELECT trigger_name, trigger_type, triggering_event, table_name, status\n  FROM user_triggers\n ORDER BY table_name, trigger_name;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "# The end\nNothing we did today was kept. Every box undid its own changes, so the numbers below are the original **18 bookings** and **18 payments**."
+    languageId: markdown
+  - kind: 2
+    value: "-- The data is exactly as it was before we started\nSELECT (SELECT COUNT(*) FROM bookings) AS total_bookings,\n       (SELECT COUNT(*) FROM payments) AS total_payments\n  FROM dual;"
+    languageId: oracle-sql
+  - kind: 1
+    value: "**In four sentences:** the database keeps every rule, so nothing can be booked twice. A booking either fully works or is fully undone. Cancelling gives back the right amount of money. And all of it is built from simple blocks: tables, rules, windows, calculators, recipes and helpers.\n\nThank you! Any questions?"
+    languageId: markdown

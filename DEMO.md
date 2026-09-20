@@ -1,104 +1,90 @@
 # Demo script — Airline Reservation System
 
-A 15–20 minute presentation for **three team members**. The database is **built live from an empty schema**,
-so each member runs their own scripts and explains what they do. Replace *Member A / B / C* with your names.
+A **10–15 minute** presentation, given alone. Everything runs live in one notebook, `demo/airline_demo.sqlnb`, inside VS Code: you press a run button, the database answers, and you say one plain sentence about what just happened. There is nothing to type.
 
-| Part | Presenter | Scripts | Topic | Time |
-|---|---|---|---|---|
-| 1 | Member A | `00`, `01`, `02`, `03` | design, constraints, data, views | ~5 min |
-| 2 | Member B | `04`, `05`, `07` | functions, procedures, cursor, package | ~5 min |
-| 3 | Member C | `06`, `08`, `09` | triggers, queries, the end-to-end demo | ~7 min |
-
-`07_package.sql` does not depend on the triggers, so Member B runs it right after `05`. Member C then runs
-`06`. (`run_all.sql` keeps the numeric order — either order gives the same result.)
+Each box in the notebook starts with a plain-English explanation. The technical term sits underneath in italics, so the box makes sense to anyone and the real names are still there for the examiner.
 
 ---
 
-## Before you start (everyone, 5 minutes before)
+## Before you start (10 minutes before)
 
-1. Widen the terminal to **200 columns** (Windows cmd: `mode con cols=200 lines=50`).
-2. Open a terminal **in the repository root** and connect once — the whole team uses this one session:
+1. **Start Docker Desktop** and wait until it says *Engine running*.
+2. In the project folder, start the database (about a minute the first time, a few seconds after that):
    ```
-   sqlplus ars/ars_pass@//localhost:1521/XEPDB1
+   docker compose up -d --wait
    ```
-3. Do a **dry run** so nobody is surprised: `@sql/run_all.sql`. It rebuilds everything and runs the demo.
-   Errors printed by the demo (`ORA-20xxx`, `ORA-02290`, …) are expected — they are the point of the demo.
-4. If the dry run was more than a day ago, run it again shortly before presenting (flight dates in the sample
-   data are relative to when `02_data.sql` runs).
-5. Have `sql/05_procedures.sql` and `sql/06_triggers.sql` open in an editor to show code while you talk.
-6. Pass the keyboard: the same SQL\*Plus session is handed from A to B to C.
+3. Open the folder `D:\proj-backend` in VS Code, then open **`demo/airline_demo.sqlnb`**.
+4. Click **No connection attached** at the bottom right of the window and pick **ARS Docker**
+   (user `ars`, password `ars_pass`, host `localhost`, port `1522`, service name `FREEPDB1`).
+5. Press the first box, *Is everything ready?* It must say **READY**. If it does not, reset the data:
+   ```
+   docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
+   ```
+6. Make the text big (**Ctrl and +** a few times) so the back of the room can read it. Close other windows and switch off notifications.
+7. Record one clean run as a backup (**Win+G** on Windows), in case something fails on the day.
 
-**If something goes wrong on stage:** run `@sql/run_all.sql` — it resets everything in a few seconds.
-Compilation problem in a script: type `SHOW ERRORS`.
+The sample data stays READY for about 17 hours after it is loaded, because the flight dates are relative to the load time. Do step 5 on the morning of the presentation. Restarting the container reloads the data too.
 
 ---
 
-## Part 1 — Member A: design, constraints, data, views (~5 min)
+## The plan
 
-**Goal:** show that the database structure itself enforces the rules.
+**Open with (30 seconds):** *"This is an airline ticket system. All the rules live inside the database, so a seat can never be booked twice and a booking is never left half-done. I'll show it working, and then how it is built."*
 
-### Run
+Press each box in this order and say the sentence next to it. The notebook is in the same order.
 
-```sql
-@sql/00_drop.sql
-@sql/01_schema.sql
-@sql/02_data.sql
-@sql/03_views.sql
-```
+### 1. Watch it work (about 7 minutes)
 
-### Say
+| Box | Say | What appears |
+|---|---|---|
+| **Book a ticket** | "One command books the seat and takes the payment. The database also writes its own diary entry." | ticket CONFIRMED; seat BOOKED, one fewer left; audit row `INSERT` |
+| **Nobody can steal a seat** | "Someone else wants the same seat, the normal way and through the back door. Both are refused." | `ORA-20004` (front door), `ORA-20102` (back door) |
+| **One seat per person** | "A second seat on the same flight is refused." | `ORA-20103` |
+| **If something goes wrong, nothing is left half-done** | "The payment fails halfway, and the booking is undone too. Same numbers before and after." | counts 18 and 18 both times; `ORA-20007`, `ORA-02290` |
+| **Cancel and get money back** | "Ninety percent back, the seat is free again, and the diary is updated." | refund **9,450.00 (90%)**; CANCELLED / REFUNDED; seat AVAILABLE; audit `INSERT` then `UPDATE` |
+| **Cancel later, get less back** | "The closer to take-off, the less you get." | **2,760.00 (50%)** and **520.00 (10%)** |
+| **Cancelling things that cannot be cancelled** | "Twice, after take-off, or a ticket that does not exist: refused, with a reason." | `ORA-20009`, `ORA-20010`, `ORA-20008` |
+| **Bad data bounces off** | "Six bad things typed in. Every one is refused." | `ORA-00001`, `ORA-02290`, `ORA-01400`, `ORA-02291`, `ORA-20101`, `ORA-02290` |
+| **Deleting things safely** | "Three delete rules: protect it, keep it, or delete the related things too." | `ORA-02292` twice; `aircraft_id` becomes empty; booking and payment gone, seat free, audit `DELETE` |
 
-> "Our system has ten tables: airlines, airports, aircraft, flights, passengers, seats, bookings, payments,
-> crew, and a junction table flight_crew for the many-to-many between flights and crew. We added an eleventh,
-> booking_audit_log, for the audit trigger.
->
-> First we drop anything left over — the script ignores *table does not exist* errors, so it is safe to run on
-> an empty schema." *(run `00`)*
->
-> "Now the schema." *(run `01`)* "Every table has an identity primary key, so we need no sequences or triggers
-> to generate ids. Foreign keys use **ON DELETE CASCADE** where the child cannot exist without the parent —
-> a deleted flight takes its seats with it — and **ON DELETE SET NULL** for the aircraft on a flight: retire
-> an aircraft and the flight history stays. We use NOT NULL, UNIQUE and CHECK constraints for the data rules:
-> a valid e-mail, ten-digit phone, seat classes, and a flight cannot start and end at the same airport."
->
-> "One design choice: a booking does not store the flight. It stores the **seat**, and the seat belongs to a
-> flight. So the flight is stored once — that keeps the design in third normal form."
+Whenever the output says **The database said NO**, that is the point: the rules are working. Say so once, early, so nobody mistakes it for a failure.
 
-*Optionally show one of these:*
+### 2. Ask it questions (about 2 minutes)
 
-```sql
-DESC bookings
-SELECT constraint_name, constraint_type FROM user_constraints WHERE table_name = 'BOOKINGS';
-```
+Fifteen questions are in the notebook. Show three or four and mention the rest exist:
 
-> "There is also a **unique index on bookings that only counts CONFIRMED rows** — one confirmed booking per
-> seat, enforced by the database even if two users click at the same moment."
->
-> "Now the data: ten Indian and international airlines, fifteen airports, fifteen flights, seventeen
-> passengers." *(run `02`)* "The row counts confirm it — ten airlines, fifteen airports, fifteen flights,
-> ninety seats, eighteen bookings. The script ends with COMMIT. Flight dates are relative to today, so there
-> are always upcoming flights."
->
-> "Finally three views." *(run `03`)* "**available_seats** is what a customer can still book,
-> **passenger_itinerary** joins seven tables into one readable line per booking, and **airline_revenue** uses
-> LEFT JOINs so an airline with no bookings still appears, with zero."
+- **Question 3** (LEFT OUTER JOIN): Lufthansa has no flights and still appears, with 0.
+- **Question 7** (GROUP BY ... HAVING): the cities with at least two confirmed bookings.
+- **Question 10** (correlated subquery): flights priced above the average of *their own* airline.
+- **Question 15** (MINUS): the airports where planes only arrive.
 
-Show the views working:
+### 3. How it is built (about 2 minutes, optional)
 
-```sql
-COLUMN passenger_name FORMAT A20
-SELECT flight_no, origin, destination, seat_no, seat_class, base_fare FROM available_seats WHERE flight_id = 1;
-SELECT booking_id, passenger_name, flight_no, seat_no, booking_status, amount_paid
-  FROM passenger_itinerary WHERE passenger_id = 1;
-```
+Scroll through the headings only: **tables** (the pages of the notebook), **rules** (guards on the doors), **windows** (views), **calculators** (functions), **recipes** (procedures), **toolbox** (package), **automatic helpers** (triggers). Run the fare box: flight 2 business is 10,500; flight 1, nearly full, is 16,675.
 
-**What you should see:** flight AI-101 has exactly one seat left (1B); passenger 1 has two bookings,
-one CONFIRMED and one CANCELLED. The `03` script itself ends with the airline_revenue table — Singapore
-Airlines is on top with 96,000.00.
+### The end (30 seconds)
 
-> "Now Member B will show what we built on top of the tables."
+Press the last box: **18 bookings and 18 payments**, exactly as before. *"Nothing we did was kept. Constraints protect the structure, triggers protect the rules, and procedures make every booking all-or-nothing. Thank you. Questions?"*
 
-### Viva questions for Member A
+---
+
+## If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| The first box does not say READY | Run the reset command from step 5 above, then press the box again. |
+| A box prints **OOPS**, or a red error | Reset the data and run the box again. Say nothing dramatic: "let me reset that". |
+| A "Could not cancel booking 13" line | The sample data has gone stale. Reset it. |
+| VS Code cannot connect | Check that Docker Desktop says *Engine running* and `docker compose ps` says *healthy*. The port is **1522**, the service name is **FREEPDB1**. |
+| Nothing works at all | Play the recording you made in step 7. |
+
+---
+
+## Questions she might ask
+
+Short answers you can give. They are grouped by topic.
+
+### Design and constraints
 
 1. **Why identity columns instead of sequences plus a trigger?**
    Less code and no trigger to maintain; the database guarantees unique ids. `GENERATED BY DEFAULT ON NULL`
@@ -128,80 +114,7 @@ Airlines is on top with 96,000.00.
    Fixed, tiny value sets that never change — a CHECK is simpler. If the business added classes often, a lookup
    table with a foreign key would be better.
 
----
-
-## Part 2 — Member B: functions, procedures, cursor, package (~5 min)
-
-**Goal:** show that the business logic lives in the database and that a booking is atomic.
-
-### Run
-
-```sql
-@sql/04_functions.sql
-@sql/05_procedures.sql
-@sql/07_package.sql
-```
-
-### Say
-
-> "The business rules are stored PL/SQL. First, functions." *(run `04`)*
->
-> "**calculate_fare** takes a flight and a seat class. Base fare times a class multiplier — business is 2.5 —
-> plus 15 percent when the flight is three-quarters full and 20 percent within 48 hours of departure.
-> **seats_left** counts available seats. Both raise our own error, ORA-20001, for an unknown flight, using
-> RAISE_APPLICATION_ERROR. They are functions, not procedures, because we call them from SQL."
-
-Show them:
-
-```sql
-SELECT seats_left(2) AS seats_left, calculate_fare(2, 'BUSINESS') AS fare FROM dual;
-SELECT calculate_fare(1, 'BUSINESS') AS busy_flight FROM dual;
-SELECT calculate_fare(999, 'ECONOMY') FROM dual;
-```
-
-**What you should see:** flight 2 has 4 seats left and a business fare of 10,500.00. Flight 1 is 5/6 full, so its
-business fare is 16,675.00 — the 14,500 base × 1.15. Flight 999 raises `ORA-20001: Flight 999 does not exist`.
-
-> "Now procedures." *(run `05`)* *(switch to the editor showing `book_ticket`)*
->
-> "**book_ticket** is the heart of the system. Step one: `SAVEPOINT`. Then it validates the passenger, the
-> flight and the seat. It locks the seat row with **`SELECT … FOR UPDATE`**, so two people cannot book the same
-> seat at the same time — the second waits, then sees it is taken. It prices the seat, inserts the booking and
-> the payment, and marks the seat.
->
-> The important part is the **exception handler**: on *any* error it does `ROLLBACK TO SAVEPOINT` and re-raises.
-> So if the payment fails after the booking row was inserted, the booking disappears too — all or nothing.
-> Custom errors — seat taken, payment declined, flight departed — use RAISE_APPLICATION_ERROR with codes
-> between minus 20001 and minus 20010.
->
-> **cancel_booking** applies the refund policy: 90 percent if you cancel three days or more ahead, 50 percent
-> from one to three days, 10 percent under a day, nothing after departure. It cancels the booking, frees the
-> seat, and marks the payment refunded.
->
-> Neither procedure commits — the caller decides when the transaction is complete."
-
-Show the explicit cursor procedure:
-
-```sql
-EXEC show_passenger_bookings(1)
-```
-
-> "**show_passenger_bookings** uses an **explicit, parameterised cursor**: OPEN, FETCH in a loop, exit when
-> NOTFOUND, CLOSE, and it prints with DBMS_OUTPUT."
-
-**What you should see:** two bookings for Aarav Sharma — AI-101 (confirmed, 5,800.00) and 6E-6105 (cancelled,
-4,200.00) — and `Net spend after refunds: INR 6,220.00`.
-
-> "Last, the **package** `reservation_pkg`." *(run `07`)* "It bundles the same API under one name. The
-> specification is the public interface; the fare and refund constants are private to the body."
-
-```sql
-SELECT reservation_pkg.seats_left(2) AS seats_left, reservation_pkg.calculate_fare(2, 'BUSINESS') AS fare FROM dual;
-```
-
-> "Same answers. Member C will now put all of this under stress."
-
-### Viva questions for Member B
+### Functions, procedures and the package
 
 1. **Function vs procedure?**
    A function returns a value and can be used inside SQL; a procedure performs an action and may return values
@@ -235,75 +148,7 @@ SELECT reservation_pkg.seats_left(2) AS seats_left, reservation_pkg.calculate_fa
 10. **What does `DETERMINISTIC` mean on `refund_percentage`?**
     The same input always gives the same output, so Oracle may cache results.
 
----
-
-## Part 3 — Member C: triggers, queries, end-to-end demo (~7 min)
-
-**Goal:** show that the database defends itself, and that failures leave no trace.
-
-### Run
-
-```sql
-@sql/06_triggers.sql
-@sql/08_queries.sql
-@sql/09_demo.sql
-```
-
-### Say — triggers
-
-> "Five triggers protect the data even if someone bypasses our procedures and types SQL directly." *(run `06`)*
-> *(show the trigger list printed at the end — all VALID)*
->
-> "One validates that a flight **departs before it arrives**. One **blocks double booking**: before a booking
-> is inserted it locks the seat and refuses if the seat is already booked. One keeps **seat status in sync** —
-> booked on confirm, available on cancel. One writes an **audit log** of every booking change.
->
-> The fifth is a **compound trigger** — a passenger may hold only one seat per flight. This needs to *count
-> bookings*, but a row trigger on `bookings` is not allowed to read `bookings`: that is the **mutating table
-> error, ORA-04091**. A compound trigger solves it: the row-level part only remembers which rows changed, and
-> the counting happens in the **AFTER STATEMENT** part, when the table is no longer mutating."
-
-### Say — queries
-
-> "Fifteen queries." *(run `08`, scroll the output)* "Inner joins across four tables. **LEFT** join — Lufthansa
-> has no flights and still appears with zero. **RIGHT** join — aircraft with no flight. **FULL OUTER** —
-> the crew roster, including two crew members with no assignment. **GROUP BY** and **HAVING** — destinations
-> with at least two confirmed bookings: Mumbai, Bengaluru and Dubai. A **correlated subquery** — flights more
-> expensive than *their own airline's* average. **EXISTS** and **NOT EXISTS**. And **UNION, INTERSECT, MINUS**
-> on airports."
-
-*Pick two or three to dwell on — Q3 (outer join), Q7 (HAVING), Q10 (correlated) and Q15 (MINUS: DXB, GOI, JAI,
-SIN are arrival-only) are the most instructive.*
-
-### Say — the end-to-end demo
-
-The script pauses after every scenario ("Press Enter to continue...") and clears the screen before each STEP, so just run
-`@sql/09_demo.sql` and press Enter to advance while you narrate. (Do not use `SET PAUSE ON` as well - it would double the pauses.)
-
-> "Everything in this demo runs inside one transaction, and at the end we roll it all back, so we can repeat it."
-
-| Step | What appears | What to say |
-|---|---|---|
-| **0** | seat map of flight 2, fares 4,200 / 10,500; flight 1 business 16,675; flight 13 economy 6,240 | "Pricing reacts to demand: flight 1 is nearly full, flight 13 leaves within a day." |
-| **1** | booking created; view row; seat BOOKED; audit row `INSERT` | "One call created the booking, the payment and updated the seat. The trigger marked the seat and wrote the audit row." |
-| **2a** | `ORA-20102 Double booking prevented` | "A raw INSERT for a taken seat — our trigger stops it even without the procedure." |
-| **2b** | `ORA-20004 … already booked` | "Through the procedure we fail earlier, before inserting anything." |
-| **2c** | `ORA-20103 Passenger 16 already holds a confirmed seat` | "The compound trigger — one seat per passenger per flight, without a mutating-table error." |
-| **3a** | `ORA-20007 Payment declined`; counts unchanged | "The booking row *was* inserted, then the payment failed — and the savepoint rolled it back. Same counts, seat still available. That is atomicity." |
-| **3b** | `ORA-02290 … CK_PAYMENTS_METHOD` | "Even a database constraint failure halfway through is cleaned up." |
-| **4a** | refund **9,450.00 (90%)**; booking CANCELLED; seat AVAILABLE; audit `UPDATE` | "Ten thousand five hundred paid, ninety percent back, seat released automatically." |
-| **4b–4f** | `ORA-20009`, 50 % refund, **520.00 (10%)**, `ORA-20010`, `ORA-20008` | "Refund tiers by time; and sensible errors for a second cancel, a departed flight, an unknown booking." |
-| **5a–5f** | `ORA-00001`, `ORA-02290`, `ORA-01400`, `ORA-02291`, `ORA-20101`, `ORA-02290` | "UNIQUE, CHECK, NOT NULL, FOREIGN KEY, our own trigger — every rule is enforced." |
-| **5g–5h** | `ORA-02292` ×2 | "An airport in use, or a flight with bookings, cannot be deleted." |
-| **5i** | flight 12's `aircraft_id` becomes empty | "ON DELETE SET NULL — the flight survives." |
-| **5j** | passenger's booking and payment gone, seat freed, audit `DELETE` | "ON DELETE CASCADE — and the triggers still kept seats and the audit log correct." |
-| **6a–6e** | passenger history, audit trail, views, package | "Reports from the cursor procedure, the audit log, our views and the package." |
-| **Clean-up** | 18 bookings, 18 payments | "Rolled back — the data is exactly as before." |
-
-> "So: constraints protect the structure, triggers protect the rules, procedures make each business operation
-> atomic, and the whole system can be rebuilt with one script. Thank you — questions?"
-
-### Viva questions for Member C
+### Triggers, queries and transactions
 
 1. **Row-level vs statement-level trigger? BEFORE vs AFTER? What are `:NEW` and `:OLD`?**
    Row-level fires once per affected row (`FOR EACH ROW`), statement-level once per statement. BEFORE can validate
@@ -339,7 +184,7 @@ The script pauses after every scenario ("Press Enter to continue...") and clears
     UNION removes duplicates, UNION ALL keeps them (faster). MINUS returns rows of the first query that are not
     in the second — Oracle's name for `EXCEPT`.
 11. **Show ACID in your project.**
-    *Atomicity* — the rollback in step 3. *Consistency* — constraints and triggers in steps 2 and 5.
+    *Atomicity* — the "If something goes wrong, nothing is left half-done" box. *Consistency* — the "Nobody can steal a seat", "One seat per person" and "Bad data bounces off" boxes.
     *Isolation* — `FOR UPDATE` row lock. *Durability* — committed data survives (`02_data.sql` ends with COMMIT).
 12. **Two users book the same seat at the same moment — what happens?**
     Both call `book_ticket`; the first locks the seat row. The second waits at `FOR UPDATE`, then finds the seat
@@ -347,8 +192,11 @@ The script pauses after every scenario ("Press Enter to continue...") and clears
 
 ---
 
-## Everyone — closing checklist
+## Checklist
 
-- [ ] The team can explain **why** each constraint / trigger exists, not just what it does.
-- [ ] Nobody is surprised by the `ORA-` messages in the demo — they are expected.
+- [ ] Docker Desktop is running and `docker compose ps` shows *healthy*.
+- [ ] The first notebook box says **READY**.
+- [ ] The text is big, notifications are off, other windows are closed.
+- [ ] The backup recording is saved.
+- [ ] You can explain **why** each constraint and trigger exists, not just what it does.
 - [ ] Repository pushed: `git status` is clean and `git log` shows the scripts.

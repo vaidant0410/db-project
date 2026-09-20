@@ -28,8 +28,11 @@ sql/
   08_queries.sql     15 demo queries, each introduced by a PROMPT
   09_demo.sql        end-to-end demo (runs in one transaction, then rolls back)
   run_all.sql        runs 00 → 09 in order
+docker-compose.yml   Oracle Database Free in a container; the schema is rebuilt on every start
+docker/startdb/      10_rebuild_ars.sh, the script that rebuilds the schema
+demo/                airline_demo.sqlnb, the demo notebook for VS Code
 README.md            this file
-DEMO.md              presentation script and viva questions for a team of three
+DEMO.md              presentation script and viva questions
 ```
 
 ---
@@ -120,6 +123,27 @@ as often as you like: the queries only read, and the demo rolls itself back.
 `@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`07`) resets the database to the sample state.
 Do this shortly before presenting: flight dates in the sample data are relative to the moment `02_data.sql`
 runs, and the demo needs flights that have not departed yet.
+
+### Or: run it in Docker (what the demo uses)
+
+With [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed, one command starts an Oracle
+Database Free container and builds the schema from `sql/00`–`07` (the schema is rebuilt on **every** start, so the
+flight dates are always fresh):
+
+```
+docker compose up -d --wait
+```
+
+Connect with `ars` / `ars_pass` at `localhost:1522`, service name `FREEPDB1`
+(`sqlplus ars/ars_pass@//localhost:1522/FREEPDB1`). Port 1522 is used so it does not clash with a local Oracle XE
+on 1521. To reset the data without restarting:
+
+```
+docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
+```
+
+To run the demo notebook, install the **Oracle SQL Developer** extension (`Oracle.sql-developer`) in VS Code, add a
+connection to the database above, open `demo/airline_demo.sqlnb`, and press the run button on each box.
 
 ---
 
@@ -245,7 +269,8 @@ same seat.
 The demo runs inside a single transaction and ends with `ROLLBACK TO SAVEPOINT`, so the data is untouched
 afterwards. **The errors it prints (`ORA-20xxx`, `ORA-02290`, …) are expected — they are the demonstration.**
 
-`DEMO.md` contains a word-for-word script for presenting this as a team of three, plus viva questions.
+`demo/airline_demo.sqlnb` is the same demo as a notebook for VS Code (see section 4), written in plain language
+with one runnable box per scenario. `DEMO.md` contains the presentation script and viva questions.
 
 ---
 
