@@ -1,0 +1,38 @@
+# Airline Reservation System - Oracle Database Free in a container.
+#
+#   docker compose up -d --wait      start it; returns when the ARS schema is built and ready
+#   docker compose down              stop and remove the container (data volume is kept)
+#   docker compose down -v           ... and delete the data volume too
+#
+# Connect with:   ars / ars_pass  @  localhost:1522 / FREEPDB1
+#                 sqlplus ars/ars_pass@//localhost:1522/FREEPDB1
+#
+# Port 1522 on the host, because a locally installed Oracle XE listener usually owns 1521.
+# The schema is rebuilt from sql/00..07 on EVERY start, so the sample flight dates are always fresh.
+name: airline-reservation
+
+services:
+  oracle:
+    image: gvenzl/oracle-free:23-slim
+    container_name: ars-oracle
+    ports:
+      - "1522:1521"
+    environment:
+      # SYS/SYSTEM password of this local, throwaway container (only used for the first start)
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-ars_admin_pass}
+      APP_USER: ars
+      APP_USER_PASSWORD: ars_pass
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./sql:/opt/ars-sql:ro
+      - ./docker/startdb:/container-entrypoint-startdb.d:ro
+    healthcheck:
+      # healthy = database is up AND 10_rebuild_ars.sh has finished building the schema
+      test: ["CMD-SHELL", "healthcheck.sh && test -f /tmp/ars_ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 40
+      start_period: 90s
+
+volumes:
+  oracle-data:
