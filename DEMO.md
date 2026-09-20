@@ -1,0 +1,354 @@
+# Demo script — Airline Reservation System
+
+A 15–20 minute presentation for **three team members**. The database is **built live from an empty schema**,
+so each member runs their own scripts and explains what they do. Replace *Member A / B / C* with your names.
+
+| Part | Presenter | Scripts | Topic | Time |
+|---|---|---|---|---|
+| 1 | Member A | `00`, `01`, `02`, `03` | design, constraints, data, views | ~5 min |
+| 2 | Member B | `04`, `05`, `07` | functions, procedures, cursor, package | ~5 min |
+| 3 | Member C | `06`, `08`, `09` | triggers, queries, the end-to-end demo | ~7 min |
+
+`07_package.sql` does not depend on the triggers, so Member B runs it right after `05`. Member C then runs
+`06`. (`run_all.sql` keeps the numeric order — either order gives the same result.)
+
+---
+
+## Before you start (everyone, 5 minutes before)
+
+1. Widen the terminal to **200 columns** (Windows cmd: `mode con cols=200 lines=50`).
+2. Open a terminal **in the repository root** and connect once — the whole team uses this one session:
+   ```
+   sqlplus ars/ars_pass@//localhost:1521/XEPDB1
+   ```
+3. Do a **dry run** so nobody is surprised: `@sql/run_all.sql`. It rebuilds everything and runs the demo.
+   Errors printed by the demo (`ORA-20xxx`, `ORA-02290`, …) are expected — they are the point of the demo.
+4. If the dry run was more than a day ago, run it again shortly before presenting (flight dates in the sample
+   data are relative to when `02_data.sql` runs).
+5. Have `sql/05_procedures.sql` and `sql/06_triggers.sql` open in an editor to show code while you talk.
+6. Pass the keyboard: the same SQL\*Plus session is handed from A to B to C.
+
+**If something goes wrong on stage:** run `@sql/run_all.sql` — it resets everything in a few seconds.
+Compilation problem in a script: type `SHOW ERRORS`.
+
+---
+
+## Part 1 — Member A: design, constraints, data, views (~5 min)
+
+**Goal:** show that the database structure itself enforces the rules.
+
+### Run
+
+```sql
+@sql/00_drop.sql
+@sql/01_schema.sql
+@sql/02_data.sql
+@sql/03_views.sql
+```
+
+### Say
+
+> "Our system has ten tables: airlines, airports, aircraft, flights, passengers, seats, bookings, payments,
+> crew, and a junction table flight_crew for the many-to-many between flights and crew. We added an eleventh,
+> booking_audit_log, for the audit trigger.
+>
+> First we drop anything left over — the script ignores *table does not exist* errors, so it is safe to run on
+> an empty schema." *(run `00`)*
+>
+> "Now the schema." *(run `01`)* "Every table has an identity primary key, so we need no sequences or triggers
+> to generate ids. Foreign keys use **ON DELETE CASCADE** where the child cannot exist without the parent —
+> a deleted flight takes its seats with it — and **ON DELETE SET NULL** for the aircraft on a flight: retire
+> an aircraft and the flight history stays. We use NOT NULL, UNIQUE and CHECK constraints for the data rules:
+> a valid e-mail, ten-digit phone, seat classes, and a flight cannot start and end at the same airport."
+>
+> "One design choice: a booking does not store the flight. It stores the **seat**, and the seat belongs to a
+> flight. So the flight is stored once — that keeps the design in third normal form."
+
+*Optionally show one of these:*
+
+```sql
+DESC bookings
+SELECT constraint_name, constraint_type FROM user_constraints WHERE table_name = 'BOOKINGS';
+```
+
+> "There is also a **unique index on bookings that only counts CONFIRMED rows** — one confirmed booking per
+> seat, enforced by the database even if two users click at the same moment."
+>
+> "Now the data: ten Indian and international airlines, fifteen airports, fifteen flights, seventeen
+> passengers." *(run `02`)* "The row counts confirm it — ten airlines, fifteen airports, fifteen flights,
+> ninety seats, eighteen bookings. The script ends with COMMIT. Flight dates are relative to today, so there
+> are always upcoming flights."
+>
+> "Finally three views." *(run `03`)* "**available_seats** is what a customer can still book,
+> **passenger_itinerary** joins seven tables into one readable line per booking, and **airline_revenue** uses
+> LEFT JOINs so an airline with no bookings still appears, with zero."
+
+Show the views working:
+
+```sql
+COLUMN passenger_name FORMAT A20
+SELECT flight_no, origin, destination, seat_no, seat_class, base_fare FROM available_seats WHERE flight_id = 1;
+SELECT booking_id, passenger_name, flight_no, seat_no, booking_status, amount_paid
+  FROM passenger_itinerary WHERE passenger_id = 1;
+```
+
+**What you should see:** flight AI-101 has exactly one seat left (1B); passenger 1 has two bookings,
+one CONFIRMED and one CANCELLED. The `03` script itself ends with the airline_revenue table — Singapore
+Airlines is on top with 96,000.00.
+
+> "Now Member B will show what we built on top of the tables."
+
+### Viva questions for Member A
+
+1. **Why identity columns instead of sequences plus a trigger?**
+   Less code and no trigger to maintain; the database guarantees unique ids. `GENERATED BY DEFAULT ON NULL`
+   lets our sample data supply explicit ids while new rows get generated ones (starting at 1000, so no clash).
+2. **What is the difference between PRIMARY KEY and UNIQUE?**
+   A table has one primary key (unique + NOT NULL). It may have many UNIQUE constraints and they allow NULLs
+   (e.g. `passport_no`).
+3. **Explain ON DELETE CASCADE vs SET NULL vs the default. Where do you use each and why?**
+   CASCADE: airline → aircraft/flights, flight → seats, passenger → bookings, booking → payment. SET NULL:
+   `flights.aircraft_id`. Default (restrict): airports, and `bookings.seat_id` — a flight with bookings must
+   not vanish, so deleting it fails with ORA-02292.
+4. **Which normal form is the design in? Why does `bookings` not have a `flight_id`?**
+   3NF. `flight_id` is determined by `seat_id`; storing it in bookings would duplicate data and allow a
+   booking whose seat and flight disagree.
+5. **Why is `flight_crew` a separate table?**
+   Flights and crew are many-to-many. The junction table's composite primary key `(flight_id, crew_id)`
+   prevents assigning the same person to the same flight twice.
+6. **What is the `uq_bookings_active_seat` index?**
+   A function-based unique index on `CASE WHEN status='CONFIRMED' THEN seat_id END`. Cancelled rows become NULL
+   and are not indexed, so a seat can have many cancelled bookings but only one confirmed one.
+7. **What is a view? Can you INSERT into `airline_revenue`?**
+   A stored query, no data of its own. No — a view with GROUP BY / aggregates is not updatable.
+8. **What is the difference between DROP, TRUNCATE and DELETE? What does PURGE do?**
+   DROP removes the table; TRUNCATE removes all rows fast without rollback; DELETE removes chosen rows and can be
+   rolled back. PURGE skips the recycle bin so the space is freed immediately.
+9. **Why CHECK constraints instead of lookup tables for status / class?**
+   Fixed, tiny value sets that never change — a CHECK is simpler. If the business added classes often, a lookup
+   table with a foreign key would be better.
+
+---
+
+## Part 2 — Member B: functions, procedures, cursor, package (~5 min)
+
+**Goal:** show that the business logic lives in the database and that a booking is atomic.
+
+### Run
+
+```sql
+@sql/04_functions.sql
+@sql/05_procedures.sql
+@sql/07_package.sql
+```
+
+### Say
+
+> "The business rules are stored PL/SQL. First, functions." *(run `04`)*
+>
+> "**calculate_fare** takes a flight and a seat class. Base fare times a class multiplier — business is 2.5 —
+> plus 15 percent when the flight is three-quarters full and 20 percent within 48 hours of departure.
+> **seats_left** counts available seats. Both raise our own error, ORA-20001, for an unknown flight, using
+> RAISE_APPLICATION_ERROR. They are functions, not procedures, because we call them from SQL."
+
+Show them:
+
+```sql
+SELECT seats_left(2) AS seats_left, calculate_fare(2, 'BUSINESS') AS fare FROM dual;
+SELECT calculate_fare(1, 'BUSINESS') AS busy_flight FROM dual;
+SELECT calculate_fare(999, 'ECONOMY') FROM dual;
+```
+
+**What you should see:** flight 2 has 4 seats left and a business fare of 10,500.00. Flight 1 is 5/6 full, so its
+business fare is 16,675.00 — the 14,500 base × 1.15. Flight 999 raises `ORA-20001: Flight 999 does not exist`.
+
+> "Now procedures." *(run `05`)* *(switch to the editor showing `book_ticket`)*
+>
+> "**book_ticket** is the heart of the system. Step one: `SAVEPOINT`. Then it validates the passenger, the
+> flight and the seat. It locks the seat row with **`SELECT … FOR UPDATE`**, so two people cannot book the same
+> seat at the same time — the second waits, then sees it is taken. It prices the seat, inserts the booking and
+> the payment, and marks the seat.
+>
+> The important part is the **exception handler**: on *any* error it does `ROLLBACK TO SAVEPOINT` and re-raises.
+> So if the payment fails after the booking row was inserted, the booking disappears too — all or nothing.
+> Custom errors — seat taken, payment declined, flight departed — use RAISE_APPLICATION_ERROR with codes
+> between minus 20001 and minus 20010.
+>
+> **cancel_booking** applies the refund policy: 90 percent if you cancel three days or more ahead, 50 percent
+> from one to three days, 10 percent under a day, nothing after departure. It cancels the booking, frees the
+> seat, and marks the payment refunded.
+>
+> Neither procedure commits — the caller decides when the transaction is complete."
+
+Show the explicit cursor procedure:
+
+```sql
+EXEC show_passenger_bookings(1)
+```
+
+> "**show_passenger_bookings** uses an **explicit, parameterised cursor**: OPEN, FETCH in a loop, exit when
+> NOTFOUND, CLOSE, and it prints with DBMS_OUTPUT."
+
+**What you should see:** two bookings for Aarav Sharma — AI-101 (confirmed, 5,800.00) and 6E-6105 (cancelled,
+4,200.00) — and `Net spend after refunds: INR 6,220.00`.
+
+> "Last, the **package** `reservation_pkg`." *(run `07`)* "It bundles the same API under one name. The
+> specification is the public interface; the fare and refund constants are private to the body."
+
+```sql
+SELECT reservation_pkg.seats_left(2) AS seats_left, reservation_pkg.calculate_fare(2, 'BUSINESS') AS fare FROM dual;
+```
+
+> "Same answers. Member C will now put all of this under stress."
+
+### Viva questions for Member B
+
+1. **Function vs procedure?**
+   A function returns a value and can be used inside SQL; a procedure performs an action and may return values
+   through OUT parameters. `calculate_fare` is a function because we want `SELECT calculate_fare(...)`;
+   `book_ticket` changes data, so it is a procedure.
+2. **What does SAVEPOINT do, and how is `ROLLBACK TO SAVEPOINT` different from `ROLLBACK`?**
+   A savepoint marks a point in the transaction. `ROLLBACK TO` undoes only the work after it; the transaction
+   stays open. Plain `ROLLBACK` undoes everything since the last COMMIT.
+3. **Why do the procedures not COMMIT?**
+   The caller may be running several steps as one unit of work. The procedure guarantees it leaves nothing
+   half-done (via the savepoint), and the caller decides when to make it permanent.
+4. **What does `RAISE_APPLICATION_ERROR` do? Why -20001 to -20999?**
+   It raises a user-defined error with your own code and message. Oracle reserves that range for applications;
+   other numbers belong to Oracle's own errors.
+5. **Why `WHEN OTHERS THEN ROLLBACK TO SAVEPOINT …; RAISE;` — why re-raise?**
+   Rolling back cleans up. Re-raising tells the caller what went wrong; swallowing the exception would make a
+   failed booking look successful.
+6. **What does `SELECT … FOR UPDATE` do here?**
+   It locks the seat row until COMMIT/ROLLBACK. A second session trying to book the same seat waits, then
+   re-reads the row, sees `BOOKED`, and is refused — no double booking, no lost update.
+7. **Explicit vs implicit cursor? What are the cursor attributes?**
+   An implicit cursor is created by Oracle for every SQL statement (`SQL%ROWCOUNT`). An explicit cursor is
+   declared by you for multi-row queries and controlled with OPEN / FETCH / CLOSE. Attributes: `%FOUND`,
+   `%NOTFOUND`, `%ROWCOUNT`, `%ISOPEN`.
+8. **What is `%TYPE` / `%ROWTYPE`?**
+   `%TYPE` copies one column's data type; `%ROWTYPE` copies a whole row (or cursor row) structure. The code
+   adapts if a column type changes.
+9. **What is a package — specification vs body — and why use one?**
+   The specification declares the public interface; the body holds the implementation and private items.
+   Benefits: one namespace, hidden internals, and the body can be recompiled without invalidating callers.
+10. **What does `DETERMINISTIC` mean on `refund_percentage`?**
+    The same input always gives the same output, so Oracle may cache results.
+
+---
+
+## Part 3 — Member C: triggers, queries, end-to-end demo (~7 min)
+
+**Goal:** show that the database defends itself, and that failures leave no trace.
+
+### Run
+
+```sql
+@sql/06_triggers.sql
+@sql/08_queries.sql
+@sql/09_demo.sql
+```
+
+### Say — triggers
+
+> "Five triggers protect the data even if someone bypasses our procedures and types SQL directly." *(run `06`)*
+> *(show the trigger list printed at the end — all VALID)*
+>
+> "One validates that a flight **departs before it arrives**. One **blocks double booking**: before a booking
+> is inserted it locks the seat and refuses if the seat is already booked. One keeps **seat status in sync** —
+> booked on confirm, available on cancel. One writes an **audit log** of every booking change.
+>
+> The fifth is a **compound trigger** — a passenger may hold only one seat per flight. This needs to *count
+> bookings*, but a row trigger on `bookings` is not allowed to read `bookings`: that is the **mutating table
+> error, ORA-04091**. A compound trigger solves it: the row-level part only remembers which rows changed, and
+> the counting happens in the **AFTER STATEMENT** part, when the table is no longer mutating."
+
+### Say — queries
+
+> "Fifteen queries." *(run `08`, scroll the output)* "Inner joins across four tables. **LEFT** join — Lufthansa
+> has no flights and still appears with zero. **RIGHT** join — aircraft with no flight. **FULL OUTER** —
+> the crew roster, including two crew members with no assignment. **GROUP BY** and **HAVING** — destinations
+> with at least two confirmed bookings: Mumbai, Bengaluru and Dubai. A **correlated subquery** — flights more
+> expensive than *their own airline's* average. **EXISTS** and **NOT EXISTS**. And **UNION, INTERSECT, MINUS**
+> on airports."
+
+*Pick two or three to dwell on — Q3 (outer join), Q7 (HAVING), Q10 (correlated) and Q15 (MINUS: DXB, GOI, JAI,
+SIN are arrival-only) are the most instructive.*
+
+### Say — the end-to-end demo
+
+Run it with paging so you can narrate: `SET PAUSE ON` then `@sql/09_demo.sql` (press Enter to advance; `SET PAUSE OFF`
+afterwards). Or paste one STEP at a time from the file.
+
+> "Everything in this demo runs inside one transaction, and at the end we roll it all back, so we can repeat it."
+
+| Step | What appears | What to say |
+|---|---|---|
+| **0** | seat map of flight 2, fares 4,200 / 10,500; flight 1 business 16,675; flight 13 economy 6,240 | "Pricing reacts to demand: flight 1 is nearly full, flight 13 leaves within a day." |
+| **1** | booking created; view row; seat BOOKED; audit row `INSERT` | "One call created the booking, the payment and updated the seat. The trigger marked the seat and wrote the audit row." |
+| **2a** | `ORA-20102 Double booking prevented` | "A raw INSERT for a taken seat — our trigger stops it even without the procedure." |
+| **2b** | `ORA-20004 … already booked` | "Through the procedure we fail earlier, before inserting anything." |
+| **2c** | `ORA-20103 Passenger 16 already holds a confirmed seat` | "The compound trigger — one seat per passenger per flight, without a mutating-table error." |
+| **3a** | `ORA-20007 Payment declined`; counts unchanged | "The booking row *was* inserted, then the payment failed — and the savepoint rolled it back. Same counts, seat still available. That is atomicity." |
+| **3b** | `ORA-02290 … CK_PAYMENTS_METHOD` | "Even a database constraint failure halfway through is cleaned up." |
+| **4a** | refund **9,450.00 (90%)**; booking CANCELLED; seat AVAILABLE; audit `UPDATE` | "Ten thousand five hundred paid, ninety percent back, seat released automatically." |
+| **4b–4f** | `ORA-20009`, 50 % refund, **520.00 (10%)**, `ORA-20010`, `ORA-20008` | "Refund tiers by time; and sensible errors for a second cancel, a departed flight, an unknown booking." |
+| **5a–5f** | `ORA-00001`, `ORA-02290`, `ORA-01400`, `ORA-02291`, `ORA-20101`, `ORA-02290` | "UNIQUE, CHECK, NOT NULL, FOREIGN KEY, our own trigger — every rule is enforced." |
+| **5g–5h** | `ORA-02292` ×2 | "An airport in use, or a flight with bookings, cannot be deleted." |
+| **5i** | flight 12's `aircraft_id` becomes empty | "ON DELETE SET NULL — the flight survives." |
+| **5j** | passenger's booking and payment gone, seat freed, audit `DELETE` | "ON DELETE CASCADE — and the triggers still kept seats and the audit log correct." |
+| **6a–6e** | passenger history, audit trail, views, package | "Reports from the cursor procedure, the audit log, our views and the package." |
+| **Clean-up** | 18 bookings, 18 payments | "Rolled back — the data is exactly as before." |
+
+> "So: constraints protect the structure, triggers protect the rules, procedures make each business operation
+> atomic, and the whole system can be rebuilt with one script. Thank you — questions?"
+
+### Viva questions for Member C
+
+1. **Row-level vs statement-level trigger? BEFORE vs AFTER? What are `:NEW` and `:OLD`?**
+   Row-level fires once per affected row (`FOR EACH ROW`), statement-level once per statement. BEFORE can validate
+   or change `:NEW` values before the write; AFTER sees the final state. `:OLD`/`:NEW` hold the row before and
+   after the change (`:OLD` is NULL on INSERT, `:NEW` is NULL on DELETE).
+2. **What is ORA-04091 and how did you avoid it?**
+   A row trigger tried to query or change the table that fired it, which is mid-change ("mutating"). We only
+   read/write *other* tables in row triggers, and the rule that must count `bookings` is a compound trigger that
+   counts in the `AFTER STATEMENT` section.
+3. **What is a compound trigger? Name its timing points.**
+   One trigger with several sections sharing variables: `BEFORE STATEMENT`, `BEFORE EACH ROW`,
+   `AFTER EACH ROW`, `AFTER STATEMENT`. State kept in the declaration section lives for the statement.
+4. **Why check double booking in a BEFORE trigger with FOR UPDATE — and also keep a unique index?**
+   BEFORE fires early enough to give a clear custom error; `FOR UPDATE` serialises two sessions racing for a
+   seat. The unique index is the final guarantee if anything bypasses the check.
+5. **Why is the departure-before-arrival rule a trigger and not a CHECK constraint?**
+   A CHECK *could* do it, because both columns are in the same row, and is the better choice in production
+   (declarative, cheaper). We used a trigger to demonstrate custom messages with `RAISE_APPLICATION_ERROR`.
+   Rules that need other tables or the current time — like our seat rule — cannot be CHECK constraints.
+6. **Why does `booking_audit_log` have no foreign key?**
+   The log must outlive the booking. With a foreign key, deleting a booking (e.g. cascade from a passenger)
+   would fail or delete its history.
+7. **INNER vs LEFT vs RIGHT vs FULL OUTER join?**
+   INNER keeps matching rows only. LEFT keeps every left row, RIGHT every right row, FULL both, filling
+   NULLs where there is no match.
+8. **WHERE vs HAVING?**
+   WHERE filters rows before grouping; HAVING filters groups after aggregation (e.g. `COUNT(*) >= 2`).
+9. **Correlated vs non-correlated subquery? EXISTS vs IN?**
+   A correlated subquery refers to the outer row and is evaluated per row (Q10). Non-correlated runs once (Q8).
+   EXISTS stops at the first match and handles NULLs safely; NOT EXISTS is the safe anti-join (`NOT IN`
+   misbehaves with NULLs).
+10. **UNION vs UNION ALL? What is MINUS?**
+    UNION removes duplicates, UNION ALL keeps them (faster). MINUS returns rows of the first query that are not
+    in the second — Oracle's name for `EXCEPT`.
+11. **Show ACID in your project.**
+    *Atomicity* — the rollback in step 3. *Consistency* — constraints and triggers in steps 2 and 5.
+    *Isolation* — `FOR UPDATE` row lock. *Durability* — committed data survives (`02_data.sql` ends with COMMIT).
+12. **Two users book the same seat at the same moment — what happens?**
+    Both call `book_ticket`; the first locks the seat row. The second waits at `FOR UPDATE`, then finds the seat
+    `BOOKED` and gets ORA-20004. If both somehow reached the insert, the unique index would raise ORA-00001.
+
+---
+
+## Everyone — closing checklist
+
+- [ ] The team can explain **why** each constraint / trigger exists, not just what it does.
+- [ ] Nobody is surprised by the `ORA-` messages in the demo — they are expected.
+- [ ] Repository pushed: `git status` is clean and `git log` shows the scripts.
