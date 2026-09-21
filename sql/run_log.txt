@@ -1,0 +1,17 @@
+SQL> @run_all.sql
+SQL> -- =====================================================================
+SQL> -- run_all.sql  -	Airline Reservation System : build everything + demo
+SQL> --
+SQL> -- Runs scripts 00-09 in order: drop, schema, data, views, functions,
+SQL> -- procedures, triggers, package, queries, demo.
+SQL> --
+SQL> -- '@@' resolves each file relative to THIS script, so it works from
+SQL> -- any working directory:
+SQL> --     sqlplus ars/ars_pass@//localhost:1521/XEPDB1 @sql/run_all.sql
+SQL> --     SQL> @run_all.sql		 (when you are inside the sql folder)
+SQL> --
+SQL> -- Output is also written to run_all.log in the current directory.
+SQL> -- The data set is rebuilt on every run, so flight dates are fresh
+SQL> -- (the demo relies on flights leaving in the future).
+SQL> -- =====================================================================
+SQL> SET ECHO OFF

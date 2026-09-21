@@ -30,7 +30,8 @@ sql/
   run_all.sql        runs 00 → 09 in order
 docker-compose.yml   Oracle Database Free in a container; the schema is rebuilt on every start
 docker/startdb/      10_rebuild_ars.sh, the script that rebuilds the schema
-demo/                airline_demo.sqlnb, the demo notebook for VS Code
+demo/                airline_demo.sqlnb (demo notebook for VS Code) and the ER diagrams it shows
+                     (airline_erd_overview.png, airline_erd_detail.png, with .svg sources)
 README.md            this file
 DEMO.md              presentation script and viva questions
 ```
@@ -143,7 +144,7 @@ docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.s
 ```
 
 To run the demo notebook, install the **Oracle SQL Developer** extension (`Oracle.sql-developer`) in VS Code, add a
-connection to the database above, open `demo/airline_demo.sqlnb`, and press the run button on each box.
+connection to the database above, open `demo/airline_demo.sqlnb`, and run each cell.
 
 ---
 
@@ -269,8 +270,8 @@ same seat.
 The demo runs inside a single transaction and ends with `ROLLBACK TO SAVEPOINT`, so the data is untouched
 afterwards. **The errors it prints (`ORA-20xxx`, `ORA-02290`, …) are expected — they are the demonstration.**
 
-`demo/airline_demo.sqlnb` is the same demo as a notebook for VS Code (see section 4), written in plain language
-with one runnable box per scenario. `DEMO.md` contains the presentation script and viva questions.
+`demo/airline_demo.sqlnb` is the same demo as a notebook for VS Code (see section 4): a short heading and one
+runnable cell per scenario, then the 15 queries, then the structure. `DEMO.md` contains the presentation script and viva questions.
 
 ---
 

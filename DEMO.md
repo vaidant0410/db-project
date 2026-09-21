@@ -2,7 +2,7 @@
 
 A **10–15 minute** presentation, given alone. Everything runs live in one notebook, `demo/airline_demo.sqlnb`, inside VS Code: you press a run button, the database answers, and you say one plain sentence about what just happened. There is nothing to type.
 
-Each box in the notebook starts with a plain-English explanation. The technical term sits underneath in italics, so the box makes sense to anyone and the real names are still there for the examiner.
+The notebook is deliberately plain: a title, a short heading with one line of text for each step, and the code cells, which do the talking. The comment at the top of each code cell says what it shows.
 
 ---
 
@@ -16,7 +16,7 @@ Each box in the notebook starts with a plain-English explanation. The technical 
 3. Open the folder `D:\proj-backend` in VS Code, then open **`demo/airline_demo.sqlnb`**.
 4. Click **No connection attached** at the bottom right of the window and pick **ARS Docker**
    (user `ars`, password `ars_pass`, host `localhost`, port `1522`, service name `FREEPDB1`).
-5. Press the first box, *Is everything ready?* It must say **READY**. If it does not, reset the data:
+5. Run the **Ready check** cell. It must say **READY**. If it does not, reset the data:
    ```
    docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
    ```
@@ -31,40 +31,44 @@ The sample data stays READY for about 17 hours after it is loaded, because the f
 
 **Open with (30 seconds):** *"This is an airline ticket system. All the rules live inside the database, so a seat can never be booked twice and a booking is never left half-done. I'll show it working, and then how it is built."*
 
-Press each box in this order and say the sentence next to it. The notebook is in the same order.
+Run each cell in this order and say the sentence next to it. The notebook is in the same order.
 
-### 1. Watch it work (about 7 minutes)
+### Database map (about 1 minute)
 
-| Box | Say | What appears |
+The first picture in the notebook, right after the ready check, is the **map of the whole database**: eleven boxes, one per table, and lines for the links between them. Say: *"The database has eleven tables. Think of each one as a page in a notebook. The lines show which pages point to which. A bar means one, a crow's foot means many."* Point at **flights** in the middle, then at **bookings**: *"a booking points to the passenger and to the seat."*
+
+### 1. Scenarios (about 7 minutes)
+
+| Cell | Say | What appears |
 |---|---|---|
 | **Book a ticket** | "One command books the seat and takes the payment. The database also writes its own diary entry." | ticket CONFIRMED; seat BOOKED, one fewer left; audit row `INSERT` |
-| **Nobody can steal a seat** | "Someone else wants the same seat, the normal way and through the back door. Both are refused." | `ORA-20004` (front door), `ORA-20102` (back door) |
-| **One seat per person** | "A second seat on the same flight is refused." | `ORA-20103` |
-| **If something goes wrong, nothing is left half-done** | "The payment fails halfway, and the booking is undone too. Same numbers before and after." | counts 18 and 18 both times; `ORA-20007`, `ORA-02290` |
-| **Cancel and get money back** | "Ninety percent back, the seat is free again, and the diary is updated." | refund **9,450.00 (90%)**; CANCELLED / REFUNDED; seat AVAILABLE; audit `INSERT` then `UPDATE` |
-| **Cancel later, get less back** | "The closer to take-off, the less you get." | **2,760.00 (50%)** and **520.00 (10%)** |
-| **Cancelling things that cannot be cancelled** | "Twice, after take-off, or a ticket that does not exist: refused, with a reason." | `ORA-20009`, `ORA-20010`, `ORA-20008` |
-| **Bad data bounces off** | "Six bad things typed in. Every one is refused." | `ORA-00001`, `ORA-02290`, `ORA-01400`, `ORA-02291`, `ORA-20101`, `ORA-02290` |
-| **Deleting things safely** | "Three delete rules: protect it, keep it, or delete the related things too." | `ORA-02292` twice; `aircraft_id` becomes empty; booking and payment gone, seat free, audit `DELETE` |
+| **Double booking is blocked** | "Someone else wants the same seat, the normal way and through the back door. Both are refused." | `ORA-20004` (front door), `ORA-20102` (back door) |
+| **One seat per person per flight** | "A second seat on the same flight is refused." | `ORA-20103` |
+| **Failed payment is rolled back** | "The payment fails halfway, and the booking is undone too. Same numbers before and after." | counts 18 and 18 both times; `ORA-20007`, `ORA-02290` |
+| **Cancel and refund** | "Ninety percent back, the seat is free again, and the diary is updated." | refund **9,450.00 (90%)**; CANCELLED / REFUNDED; seat AVAILABLE; audit `INSERT` then `UPDATE` |
+| **Refund tiers** | "The closer to take-off, the less you get." | **2,760.00 (50%)** and **520.00 (10%)** |
+| **Refused cancellations** | "Twice, after take-off, or a ticket that does not exist: refused, with a reason." | `ORA-20009`, `ORA-20010`, `ORA-20008` |
+| **Constraints** | "Six bad things typed in. Every one is refused." | `ORA-00001`, `ORA-02290`, `ORA-01400`, `ORA-02291`, `ORA-20101`, `ORA-02290` |
+| **Delete rules** | "Three delete rules: protect it, keep it, or delete the related things too." | `ORA-02292` twice; `aircraft_id` becomes empty; booking and payment gone, seat free, audit `DELETE` |
 
 Whenever the output says **The database said NO**, that is the point: the rules are working. Say so once, early, so nobody mistakes it for a failure.
 
-### 2. Ask it questions (about 2 minutes)
+### 2. Queries (about 2 minutes)
 
-Fifteen questions are in the notebook. Show three or four and mention the rest exist:
+Fifteen queries are in the notebook. Show three or four and mention the rest exist:
 
 - **Question 3** (LEFT OUTER JOIN): Lufthansa has no flights and still appears, with 0.
 - **Question 7** (GROUP BY ... HAVING): the cities with at least two confirmed bookings.
 - **Question 10** (correlated subquery): flights priced above the average of *their own* airline.
 - **Question 15** (MINUS): the airports where planes only arrive.
 
-### 3. How it is built (about 2 minutes, optional)
+### 3. Structure (about 2 minutes, optional)
 
-Scroll through the headings only: **tables** (the pages of the notebook), **rules** (guards on the doors), **windows** (views), **calculators** (functions), **recipes** (procedures), **toolbox** (package), **automatic helpers** (triggers). Run the fare box: flight 2 business is 10,500; flight 1, nearly full, is 16,675.
+Start with **Full map**: the same picture with every column, and the delete rule drawn on every link (open `demo/airline_erd_detail.png` full screen if she wants to read the columns). Under **Tables**, the second cell lists every column as a table. Then scroll through the headings: **Links between tables**, **Views**, **Functions**, **Procedures**, **Package**, **Triggers**. Run the fare cell under **Functions**: flight 2 business is 10,500; flight 1, nearly full, is 16,675.
 
 ### The end (30 seconds)
 
-Press the last box: **18 bookings and 18 payments**, exactly as before. *"Nothing we did was kept. Constraints protect the structure, triggers protect the rules, and procedures make every booking all-or-nothing. Thank you. Questions?"*
+Run the **Final check** cell: **18 bookings and 18 payments**, exactly as before. *"Nothing we did was kept. Constraints protect the structure, triggers protect the rules, and procedures make every booking all-or-nothing. Thank you. Questions?"*
 
 ---
 
@@ -72,8 +76,8 @@ Press the last box: **18 bookings and 18 payments**, exactly as before. *"Nothin
 
 | What you see | What to do |
 |---|---|
-| The first box does not say READY | Run the reset command from step 5 above, then press the box again. |
-| A box prints **OOPS**, or a red error | Reset the data and run the box again. Say nothing dramatic: "let me reset that". |
+| The ready check does not say READY | Run the reset command from step 5 above, then run the cell again. |
+| A cell prints **OOPS**, or a red error | Reset the data and run the cell again. Say nothing dramatic: "let me reset that". |
 | A "Could not cancel booking 13" line | The sample data has gone stale. Reset it. |
 | VS Code cannot connect | Check that Docker Desktop says *Engine running* and `docker compose ps` says *healthy*. The port is **1522**, the service name is **FREEPDB1**. |
 | Nothing works at all | Play the recording you made in step 7. |
@@ -184,7 +188,7 @@ Short answers you can give. They are grouped by topic.
     UNION removes duplicates, UNION ALL keeps them (faster). MINUS returns rows of the first query that are not
     in the second — Oracle's name for `EXCEPT`.
 11. **Show ACID in your project.**
-    *Atomicity* — the "If something goes wrong, nothing is left half-done" box. *Consistency* — the "Nobody can steal a seat", "One seat per person" and "Bad data bounces off" boxes.
+    *Atomicity* — the "Failed payment is rolled back" cell. *Consistency* — the "Double booking is blocked", "One seat per person per flight" and "Constraints" cells.
     *Isolation* — `FOR UPDATE` row lock. *Durability* — committed data survives (`02_data.sql` ends with COMMIT).
 12. **Two users book the same seat at the same moment — what happens?**
     Both call `book_ticket`; the first locks the seat row. The second waits at `FOR UPDATE`, then finds the seat
