@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rebuilds the ARS schema (sql/00 .. sql/07) inside the FREEPDB1 pluggable database.
+# Rebuilds the ARS schema (sql/00 .. sql/08) inside the FREEPDB1 pluggable database.
 #
 # The container runs this on every start (it is mounted into /container-entrypoint-startdb.d).
 # Run it by hand to reset the data to the sample state:
@@ -16,7 +16,7 @@ WORK=$(mktemp -d)
 rm -f "$READY"
 
 # Git on Windows may check the scripts out with CRLF line endings (core.autocrlf); work on LF copies.
-cp /opt/ars-sql/0[0-7]_*.sql "$WORK"/
+cp /opt/ars-sql/0[0-8]_*.sql "$WORK"/
 sed -i 's/\r$//' "$WORK"/*.sql
 
 {
@@ -24,7 +24,7 @@ sed -i 's/\r$//' "$WORK"/*.sql
   echo "SET SERVEROUTPUT ON SIZE UNLIMITED"
   echo "WHENEVER SQLERROR CONTINUE"
   echo "SPOOL /tmp/ars_build.log"
-  for f in "$WORK"/0[0-7]_*.sql; do echo "@$f"; done
+  for f in "$WORK"/0[0-8]_*.sql; do echo "@$f"; done
   echo "SPOOL OFF"
   echo "EXIT"
 } > "$WORK/build.sql"

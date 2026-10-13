@@ -1,7 +1,7 @@
 -- =====================================================================
 -- 00_drop.sql  -  Airline Reservation System : safe cleanup
 --
--- Drops every object created by scripts 01-07 so the project can be
+-- Drops every object created by scripts 01-08 so the project can be
 -- rebuilt from scratch. Objects that do not exist yet are skipped, so
 -- the script is safe to run on an empty schema.
 --
@@ -46,11 +46,13 @@ DECLARE
   END drop_it;
 BEGIN
   -- views
+  drop_it('DROP VIEW departures_board');
   drop_it('DROP VIEW airline_revenue');
   drop_it('DROP VIEW passenger_itinerary');
   drop_it('DROP VIEW available_seats');
 
   -- package (spec + body), then standalone routines
+  drop_it('DROP PACKAGE flight_search_pkg');
   drop_it('DROP PACKAGE reservation_pkg');
   drop_it('DROP PROCEDURE show_passenger_bookings');
   drop_it('DROP PROCEDURE cancel_booking');

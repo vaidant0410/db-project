@@ -1,13 +1,14 @@
 # Airline Reservation System — Oracle SQL / PL/SQL backend
 
-A DBMS lab project: the complete database backend of an airline reservation system, written in pure
-**Oracle SQL and PL/SQL** for **Oracle Database 21c Express Edition**, run from **SQL\*Plus**.
-Every rule (pricing, double-booking protection, refunds, auditing) lives in the database, so a frontend
-or API layer only has to call the procedures / package and read the views.
+A DBMS lab project: an airline reservation system whose backend is written in pure
+**Oracle SQL and PL/SQL** (Oracle Database 21c XE, or Oracle Database Free in Docker).
+Every rule (pricing, flight generation, double-booking protection, refunds, auditing) lives in the database.
+A small Node.js API (`api/`) turns HTTP requests into procedure calls and serves the web frontend (`web/`).
 
 * **10 entity tables** — airlines, airports, aircraft, flights, passengers, seats, bookings, payments,
   crew, flight_crew (+ `booking_audit_log`)
-* **3 views**, **3 functions**, **3 procedures**, **1 package**, **5 triggers** (one of them a compound trigger)
+* **143 airports** worldwide and **90 airlines**: a search between **any two airports** generates flights on demand
+* **4 views**, **3 functions**, **3 procedures**, **2 packages**, **5 triggers** (one of them a compound trigger)
 
 ---
 
@@ -22,8 +23,13 @@ sql/
   04_functions.sql   calculate_fare, seats_left, refund_percentage
   05_procedures.sql  book_ticket, cancel_booking, show_passenger_bookings
   06_triggers.sql    validation, double-booking guard, seat sync, audit log
-  07_package.sql     reservation_pkg (optional, bundles the booking API)
-  run_all.sql        runs 00 → 07 in order
+  07_package.sql     reservation_pkg (bundles the booking API)
+  08_flight_search.sql  flight_search_pkg (search any route, seat map, quick booking) + departures_board view
+  run_all.sql        runs 00 → 08 in order
+api/                 server.js: Express + node-oracledb, the HTTP API; also serves web/
+web/                 index.html: one page with six tabs (home, book a flight, departures,
+                     hot destinations, manage booking, profile); assets/ holds the shared styles and scripts.
+                     The animated ascii art comes from ascii.rest (MIT licence).
 docker-compose.yml   Oracle Database Free in a container; the schema is rebuilt on every start
 docker/startdb/      10_rebuild_ars.sh, the script that rebuilds the schema
 docs/                ER diagrams (airline_erd_overview.png, airline_erd_detail.png, with .svg sources)
@@ -114,14 +120,14 @@ Scripts `03`–`07` need the earlier ones to have been run.
 
 ### Start over
 
-`@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`07`) resets the database to the sample state.
+`@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`08`) resets the database to the sample state.
 Flight dates in the sample data are relative to the moment `02_data.sql` runs, so reload it when the sample
 flights have departed and you need bookable ones again.
 
 ### Or: run it in Docker (recommended for development)
 
 With [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed, one command starts an Oracle
-Database Free container and builds the schema from `sql/00`–`07` (the schema is rebuilt on **every** start, so the
+Database Free container and builds the schema from `sql/00`–`08` (the schema is rebuilt on **every** start, so the
 flight dates are always fresh):
 
 ```
@@ -136,7 +142,37 @@ on 1521. To reset the data without restarting:
 docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
 ```
 
-These are the connection details a frontend / API layer should use during development.
+These are the connection details the API uses during development. The container runs on Indian time
+(`TZ: Asia/Kolkata`), so `SYSDATE` matches the clock of the people booking.
+
+### Run the website
+
+With the database running, start the API (Node.js 18 or newer):
+
+```
+cd api
+npm install
+npm start
+```
+
+Then open <http://localhost:3000>. The API reads `DB_USER`, `DB_PASSWORD`, `DB_CONNECT` and `PORT` from the
+environment; the defaults match the Docker database.
+
+| Endpoint | Calls |
+|---|---|
+| `GET /api/airports` | `airports` table |
+| `GET /api/search?from=DEL&to=LHR&date=2026-10-20&cls=ECONOMY` | `flight_search_pkg.search_flights` |
+| `GET /api/flights/:id/seats` | `flight_search_pkg.seat_map` |
+| `POST /api/bookings` `{firstName, lastName, email, phone, flightId, seatClass, seatNo?, method}` | `flight_search_pkg.quick_book`, then `COMMIT` |
+| `GET /api/bookings/:id?email=` | `flight_search_pkg.find_booking` |
+| `POST /api/bookings/round-trip` `{firstName, lastName, email, phone, method, legs: [2 x {flightId, seatClass, seatNo?}]}` | `flight_search_pkg.quick_book_round_trip`, then `COMMIT` |
+| `POST /api/bookings/:id/cancel` `{email}` | `flight_search_pkg.cancel_my_booking`, then `COMMIT` |
+| `POST /api/profile` `{email, phone}` | `flight_search_pkg.my_bookings` (all past and future bookings of that e-mail) |
+| `GET /api/departures?limit=14` | `departures_board` view |
+| `GET /api/fares/from/:origin?to=BOM,DXB` | cheapest economy fare a week out, per destination |
+
+Errors raised by the packages (`ORA-20xxx`) come back as JSON `{error, code}` with a matching HTTP status
+(404 not found, 409 conflict, 400 bad input, 422 not bookable, 402 payment declined).
 
 ---
 
@@ -159,11 +195,11 @@ bookings ──(trigger)──> booking_audit_log
 
 | Table | Purpose | Notable rules |
 |---|---|---|
-| `airlines` | carriers | unique 2-character IATA code and name |
-| `airports` | airports | unique 3-letter IATA code |
+| `airlines` | carriers | unique 2-character IATA code and name; `network` DOMESTIC / REGIONAL / GLOBAL; `fare_factor` 0.5–2 |
+| `airports` | airports | unique 3-letter IATA code; latitude / longitude for distances |
 | `aircraft` | fleet | unique registration, status ACTIVE / MAINTENANCE / RETIRED |
 | `flights` | scheduled flights | origin ≠ destination (CHECK), departure < arrival (trigger), unique (flight_no, departure) |
-| `passengers` | customers | unique e-mail, 10-digit phone (CHECK), optional unique passport |
+| `passengers` | customers | unique (e-mail, first name, last name), so one e-mail can book for a family; phone 7–15 digits with an optional `+`; date of birth, gender and passport optional |
 | `seats` | seat inventory per flight | class ECONOMY / BUSINESS / FIRST, status AVAILABLE / BOOKED, unique (flight, seat_no) |
 | `bookings` | a passenger holding a seat | status CONFIRMED / CANCELLED; the flight is reached through the seat (3NF) |
 | `payments` | money in and out | one per booking, refund ≤ amount |
@@ -180,8 +216,9 @@ bookings ──(trigger)──> booking_audit_log
 
 Identity columns start at **1000**; the sample data uses explicit ids below 1000, so they never collide.
 
-The seat map is deliberately small — **6 seats per flight** (2 premium, 4 economy) — to keep sample output
-readable. `aircraft.total_seats` holds the real capacity of the aircraft type.
+The 15 hand-written sample flights have a small seat map — **6 seats per flight** (2 premium, 4 economy) — to
+keep sample output readable. Generated flights have 68 seats (2 business rows, 10 economy rows), or 70 with a
+first-class row from 4,000 km. `aircraft.total_seats` holds the real capacity of the aircraft type.
 
 ---
 
@@ -210,6 +247,37 @@ booking and the payment, and marks the seat. It takes a `SAVEPOINT` on entry; **
 and re-raises the error, so a half-finished booking is never left behind. The procedures never `COMMIT` —
 the caller controls the transaction.
 
+**Flight search** — `flight_search_pkg.search_flights(origin, destination, date, class, OUT cursor)`.
+The first search for a route and day generates 4–7 non-stop flights (`ensure_flights`):
+
+```
+distance  = great-circle distance between the airports (haversine)
+duration  = 30 min + distance at 800 km/h, rounded to 5 minutes
+airlines  = domestic route: the airlines of that country
+            international route: REGIONAL / GLOBAL airlines of the two countries (60 %)
+                                 + GLOBAL airlines from elsewhere (40 %)
+            low-cost carriers (fare_factor < 0.90) only up to 5,000 km
+base fare = (1,500 + 4.8 INR per km) x airline fare_factor x 0.85-1.15, rounded to 10 INR
+seats     = 15-80 % already sold through other channels
+```
+
+`DBMS_RANDOM` is seeded with route + date, so the same search always gives the same flights. Generated flights
+are written in an autonomous transaction (they are timetable data and stay even if the caller rolls back), and a
+row lock on the origin airport stops two sessions from generating the same route at once.
+
+**Quick booking** — `flight_search_pkg.quick_book(first, last, email, phone, flight, class, seat_no, method, OUT …)`
+needs nothing but a name, e-mail and phone: it finds or creates the passenger, picks the first free seat of the
+class when no seat is given, and calls `book_ticket`. A booking is later found or cancelled with its number and
+the e-mail (`find_booking`, `cancel_my_booking`).
+
+**Round trip** — `flight_search_pkg.quick_book_round_trip` calls `quick_book` twice under one `SAVEPOINT`: if the
+return leg fails (seat taken, sold out, …) the outbound booking is rolled back too, so a customer never ends up
+with half a trip. The return flight must leave after the outbound flight lands (-20019).
+
+**Profile** — `flight_search_pkg.my_bookings(email, phone, OUT cursor)` lists every booking made with an e-mail,
+past and future, once the phone number matches one of its passengers (the last 10 digits are compared, so
+`+91 98100 12345` and `9810012345` are the same number).
+
 ### Custom error codes
 
 | Code | Meaning | Raised by |
@@ -224,6 +292,16 @@ the caller controls the transaction.
 | -20008 | booking does not exist | `cancel_booking` |
 | -20009 | booking already cancelled | `cancel_booking` |
 | -20010 | flight already departed | `cancel_booking` |
+| -20011 | unknown airport code | `flight_search_pkg` |
+| -20012 | origin and destination are the same airport | `flight_search_pkg` |
+| -20013 | date outside the booking window (today to 365 days) | `flight_search_pkg` |
+| -20014 | no seats left in that class | `quick_book` |
+| -20015 | no booking with that number for that e-mail | `find_booking`, `cancel_my_booking` |
+| -20016 | first and last name are required | `quick_book` |
+| -20017 | invalid e-mail address | `quick_book` |
+| -20018 | invalid phone number | `quick_book`, `my_bookings` |
+| -20019 | return flight leaves before the outbound flight lands | `quick_book_round_trip` |
+| -20020 | no bookings for that e-mail and phone number | `my_bookings` |
 | -20101 | arrival not after departure | trigger `trg_flights_validate_times` |
 | -20102 | seat already booked | trigger `trg_bookings_no_double_booking` |
 | -20103 | passenger already holds a seat on the flight | compound trigger `trg_bookings_one_per_flight` |

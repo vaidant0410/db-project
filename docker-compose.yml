@@ -21,6 +21,8 @@ services:
       # SYS/SYSTEM password of this local, throwaway container (only used for the first start)
       ORACLE_PASSWORD: ${ORACLE_PASSWORD:-ars_admin_pass}
       APP_USER: ars
+      # SYSDATE follows this zone: flight times and 'today' are Indian time
+      TZ: Asia/Kolkata
       APP_USER_PASSWORD: ars_pass
     volumes:
       - oracle-data:/opt/oracle/oradata

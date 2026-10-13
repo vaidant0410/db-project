@@ -1,0 +1,154 @@
+/* ARS terminal look: one monospace font, box-character frames, bracket controls.
+   Frames are drawn by tui.js; everything here is plain CSS. */
+
+/* full font files: the Google Fonts subsets leave out the box-drawing characters */
+@font-face { font-family: "JBM"; font-weight: 400; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Regular.woff2") format("woff2"); }
+@font-face { font-family: "JBM"; font-weight: 700; font-display: swap;
+  src: url("https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Bold.woff2") format("woff2"); }
+
+:root {
+  --bg: #0c0c0c; --fg: #cfcfcf; --dim: #6e6e6e; --faint: #3a3a3a; --hover: #1a1a1a;
+  --amber: #f5a623; --green: #4ade80; --red: #f87171;
+  --mono: "JBM", ui-monospace, Menlo, Consolas, monospace;
+  --lh: 1.25;
+  --line: calc(var(--lh) * 1em);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font: 14px/var(--lh) var(--mono); }
+a { color: inherit; text-decoration: none; }
+::selection { background: var(--amber); color: #000; }
+[hidden] { display: none !important; }
+ascii-art, ascii-banner { display: block; color: var(--fg); }
+ascii-art pre { font-family: var(--mono) !important; }
+
+.page { max-width: 1240px; margin: 0 auto; padding: 0 16px; }
+.dim { color: var(--dim); } .amber { color: var(--amber); } .green { color: var(--green); } .red { color: var(--red); }
+.center { display: flex; justify-content: center; overflow: hidden; }
+.nowrap { white-space: nowrap; }
+
+/* top bar */
+.top { display: flex; flex-wrap: wrap; gap: 4px 24px; align-items: center; padding: 14px 0; }
+.brand { font-weight: 700; color: var(--amber); }
+.nav { display: flex; flex-wrap: wrap; gap: 4px 16px; flex: 1; }
+.nav a { color: var(--dim); } .nav a:hover { color: var(--fg); } .nav a.on { color: var(--amber); }
+
+/* tab bar, htop style: [1] home [2] book a flight ... */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px 1ch; flex: 1; }
+.tabs a { color: var(--dim); white-space: pre; padding: 0 1ch 0 0; }
+.tabs a kbd { font: inherit; background: #1d1d1d; color: var(--fg); padding: 0 1ch; margin-right: 1ch; }
+.tabs a:hover { color: var(--fg); }
+.tabs a.on { background: var(--amber); color: #000; }
+.tabs a.on kbd { background: #000; color: var(--amber); }
+
+/* flight cards */
+.cards { display: grid; gap: var(--line); }
+.tui.fcard { display: grid; grid-template-columns: 14ch minmax(0, 1fr) 20ch; gap: 0 3ch; align-items: center; cursor: pointer; }
+.fcard:hover > .edge, .fcard.picked > .edge { color: var(--amber); }
+.fcard .logo ascii-banner { width: 12ch; }
+.fcard .logo .name { color: var(--dim); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fcard .route { display: grid; grid-template-columns: max-content minmax(6ch, 1fr) max-content; gap: 0 2ch; align-items: center; }
+.fcard .t { font-size: 22px; font-weight: 700; line-height: 1.25; }
+.fcard .place { color: var(--dim); white-space: nowrap; }
+.fcard .place b { color: var(--fg); font-weight: 400; }
+.fcard .mid { text-align: center; color: var(--dim); min-width: 0; }
+.fcard .track { display: flex; align-items: center; color: var(--faint); }
+.fcard .track .dash { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; }
+.fcard .track .tip { color: var(--amber); }
+.fcard .price { text-align: right; }
+.fcard .price .amt { font-size: 22px; font-weight: 700; color: var(--amber); line-height: 1.25; }
+.fcard .price .per { color: var(--dim); }
+.fcard .facts { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 0 3ch; color: var(--dim); margin-top: calc(var(--line) / 2); }
+.sortbar { display: flex; flex-wrap: wrap; gap: 0 3ch; align-items: center; margin-bottom: var(--line); }
+
+@media (max-width: 760px) {
+  .tui.fcard { grid-template-columns: minmax(0, 1fr) max-content; gap: calc(var(--line) / 2) 2ch; }
+  .fcard .logo { display: flex; align-items: center; gap: 2ch; }
+  .fcard .logo ascii-banner { width: 8ch; }
+  .fcard .route { grid-column: 1 / -1; grid-row: 2; }
+  .fcard .price { grid-column: 2; grid-row: 1; }
+  .fcard .facts { grid-column: 1 / -1; }
+  .fcard .t, .fcard .price .amt { font-size: 18px; }
+}
+
+/* panel with a drawn frame */
+.tui { position: relative; display: block; padding: var(--line) 2ch; overflow: hidden; }
+.tui > .edge { position: absolute; inset: 0 auto auto 0; margin: 0; font: inherit; color: var(--faint);
+  pointer-events: none; white-space: pre; user-select: none; }
+.tui > .edge b { color: var(--fg); font-weight: 400; }
+.tui > .edge i { color: var(--dim); font-style: normal; }
+.tui.hot > .edge { color: var(--dim); }
+.tui.ok > .edge { color: var(--green); }
+/* let an open airport dropdown spill out of its panel */
+.tui:has(.picker:not([hidden])) { overflow: visible; z-index: 10; }
+
+.grid { display: grid; gap: var(--line) 2ch; margin-bottom: var(--line); }
+.stack { display: grid; gap: var(--line); align-content: start; }
+.rule { color: var(--faint); white-space: pre; overflow: hidden; margin: calc(var(--line) * 1.5) 0 var(--line); }
+.rule b { color: var(--fg); font-weight: 400; }
+
+/* form rows, in the style of the form-controls piece */
+.row { display: grid; grid-template-columns: 2ch 11ch minmax(0, 1fr); align-items: center; min-height: calc(var(--line) * 2); }
+.row .cur { color: var(--amber); visibility: hidden; }
+.row:focus-within .cur { visibility: visible; }
+.row label, .row .lab { color: var(--dim); }
+.row:focus-within label, .row:focus-within .lab { color: var(--fg); }
+.field { display: flex; min-width: 0; position: relative; }
+.field::before { content: "[ "; color: var(--dim); white-space: pre; }
+.field::after { content: " ]"; color: var(--dim); white-space: pre; }
+.field.sel::after { content: " v ]"; }
+.field input, .field select { flex: 1; min-width: 0; appearance: none; -webkit-appearance: none; background: none; border: 0;
+  padding: 0; margin: 0; font: inherit; color: var(--fg); outline: none; color-scheme: dark; }
+.field input::placeholder { color: var(--faint); }
+.field input::-webkit-calendar-picker-indicator { filter: invert(.6); cursor: pointer; }
+.field select option { background: #161616; }
+.radios { display: flex; flex-wrap: wrap; gap: 0 3ch; }
+.radios label { cursor: pointer; color: var(--dim); white-space: pre; }
+.radios input { position: absolute; opacity: 0; pointer-events: none; }
+.radios label::before { content: "( ) "; }
+.radios label:has(input:checked) { color: var(--fg); }
+.radios label:has(input:checked)::before { content: "(*) "; color: var(--amber); }
+.radios label:has(input:focus-visible) { outline: 1px dotted var(--amber); }
+.actions { display: flex; justify-content: flex-end; align-items: center; gap: 3ch; margin-top: var(--line); flex-wrap: wrap; }
+.msg { min-height: var(--line); margin-top: var(--line); }
+
+.btn { background: none; border: 0; padding: 0; font: inherit; color: var(--fg); cursor: pointer; white-space: pre; }
+.btn::before { content: "[ "; color: var(--dim); } .btn::after { content: " ]"; color: var(--dim); }
+.btn:hover, .btn:focus-visible { color: #000; background: var(--amber); outline: none; }
+.btn:hover::before, .btn:hover::after, .btn:focus-visible::before, .btn:focus-visible::after { color: #000; }
+.btn.primary { color: var(--amber); }
+.btn:disabled { color: var(--dim); cursor: wait; background: none; }
+.btn.danger { color: var(--red); }
+
+/* airport picker dropdown */
+.picker { position: absolute; left: 0; right: 0; top: var(--line); z-index: 20; background: var(--bg); padding: var(--line) 1ch; }
+.picker .opt { display: grid; grid-template-columns: 4ch minmax(0, 1fr); gap: 1ch; padding: 0 1ch; cursor: pointer; white-space: nowrap; }
+.picker .opt span:last-child { overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+.picker .opt.on, .picker .opt:hover { background: var(--amber); color: #000; }
+.picker .opt.on span, .picker .opt:hover span { color: #000; }
+.picker .none { color: var(--dim); padding: 0 1ch; }
+
+/* tables */
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th { text-align: left; font-weight: 400; color: var(--dim); padding: 0 2ch 0 0; }
+.tbl td { padding: 0 2ch 0 0; white-space: nowrap; }
+.tbl tr.r:hover td { background: var(--hover); }
+.tbl tr.picked td { background: #1f1a10; }
+.scroll-x { overflow-x: auto; overflow-y: hidden; }
+
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0 2ch; }
+.kv > :nth-child(odd) { color: var(--dim); }
+.kv3 { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 0 2ch; }
+.bar { white-space: pre; }
+
+footer { padding: 8px 0 24px; color: var(--dim); }
+footer .links { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+@media (max-width: 640px) {
+  .tui { padding-left: 1ch; padding-right: 1ch; }
+  .tui ascii-art[piece] { font-size: 6px !important; }
+  .tui ascii-art[piece="typewriter"] { font-size: 13px !important; }
+  .nav { order: 3; flex-basis: 100%; }
+  .row { grid-template-columns: 2ch 8ch minmax(0, 1fr); }
+}

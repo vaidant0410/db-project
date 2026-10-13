@@ -1,0 +1,15 @@
+{
+  "name": "ars-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "HTTP API for the Airline Reservation System: serves web/ and calls the Oracle packages",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "oracledb": "^6.10.0"
+  }
+}

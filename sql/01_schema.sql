@@ -20,6 +20,11 @@
 --                         still has bookings cannot be deleted.
 --  * Partial unique index uq_bookings_active_seat makes "one CONFIRMED
 --    booking per seat" a database guarantee even under concurrency.
+--  * airports carry coordinates and airlines a network type and a fare
+--    factor: flight_search_pkg (08) uses them to generate flights for
+--    any route on demand.
+--  * A passenger is identified by e-mail + name, so one contact e-mail
+--    can book seats for several travellers (a family, a team).
 --
 -- Usage:  SQL> @01_schema.sql
 -- =====================================================================
@@ -48,7 +53,15 @@ CREATE TABLE airlines (
                 CONSTRAINT uq_airlines_name UNIQUE,
   country       VARCHAR2(40) NOT NULL,
   founded_year  NUMBER(4)
-                CONSTRAINT ck_airlines_year CHECK (founded_year BETWEEN 1900 AND 2100)
+                CONSTRAINT ck_airlines_year CHECK (founded_year BETWEEN 1900 AND 2100),
+  -- DOMESTIC : flies only inside its own country
+  -- REGIONAL : domestic routes + international routes touching its country
+  -- GLOBAL   : any international route as well
+  network       VARCHAR2(8) DEFAULT 'REGIONAL' NOT NULL
+                CONSTRAINT ck_airlines_network CHECK (network IN ('DOMESTIC', 'REGIONAL', 'GLOBAL')),
+  -- price level of the carrier: 0.80 low-cost ... 1.30 premium
+  fare_factor   NUMBER(3,2) DEFAULT 1 NOT NULL
+                CONSTRAINT ck_airlines_fare_factor CHECK (fare_factor BETWEEN 0.5 AND 2)
 );
 
 -- ---------------------------------------------------------------------
@@ -62,7 +75,11 @@ CREATE TABLE airports (
                 CONSTRAINT ck_airports_code CHECK (REGEXP_LIKE(iata_code, '^[A-Z]{3}$')),
   airport_name  VARCHAR2(80) NOT NULL,
   city          VARCHAR2(40) NOT NULL,
-  country       VARCHAR2(40) NOT NULL
+  country       VARCHAR2(40) NOT NULL,
+  latitude      NUMBER(8,5) NOT NULL
+                CONSTRAINT ck_airports_lat CHECK (latitude BETWEEN -90 AND 90),
+  longitude     NUMBER(8,5) NOT NULL
+                CONSTRAINT ck_airports_lon CHECK (longitude BETWEEN -180 AND 180)
 );
 
 -- ---------------------------------------------------------------------
@@ -119,17 +136,22 @@ CREATE TABLE passengers (
   first_name    VARCHAR2(30) NOT NULL,
   last_name     VARCHAR2(30) NOT NULL,
   email         VARCHAR2(80) NOT NULL
-                CONSTRAINT uq_passengers_email UNIQUE
                 CONSTRAINT ck_passengers_email CHECK (REGEXP_LIKE(email, '^[^@ ]+@[^@ ]+\.[^@ ]+$')),
-  phone         VARCHAR2(15) NOT NULL
-                CONSTRAINT ck_passengers_phone CHECK (REGEXP_LIKE(phone, '^[0-9]{10}$')),
-  date_of_birth DATE NOT NULL,
-  gender        CHAR(1) NOT NULL
+  -- 7 to 15 digits with an optional leading +, so any country's number fits
+  phone         VARCHAR2(16) NOT NULL
+                CONSTRAINT ck_passengers_phone CHECK (REGEXP_LIKE(phone, '^\+?[0-9]{7,15}$')),
+  -- optional, so a booking needs nothing beyond name, e-mail and phone
+  date_of_birth DATE,
+  gender        CHAR(1)
                 CONSTRAINT ck_passengers_gender CHECK (gender IN ('M', 'F', 'O')),
   passport_no   VARCHAR2(12)
                 CONSTRAINT uq_passengers_passport UNIQUE,
   created_at    DATE DEFAULT SYSDATE NOT NULL
 );
+
+-- one passenger per (e-mail, first name, last name), case-insensitive
+CREATE UNIQUE INDEX uq_passengers_identity
+  ON passengers (LOWER(email), LOWER(first_name), LOWER(last_name));
 
 -- ---------------------------------------------------------------------
 -- SEATS  (sellable seat inventory, one row per seat per flight)
@@ -253,6 +275,7 @@ CREATE INDEX idx_flights_airline     ON flights (airline_id);
 CREATE INDEX idx_flights_aircraft    ON flights (aircraft_id);
 CREATE INDEX idx_flights_origin      ON flights (origin_airport_id);
 CREATE INDEX idx_flights_dest        ON flights (dest_airport_id);
+CREATE INDEX idx_flights_route_dep   ON flights (origin_airport_id, dest_airport_id, departure_time);
 CREATE INDEX idx_bookings_passenger  ON bookings (passenger_id);
 CREATE INDEX idx_bookings_seat       ON bookings (seat_id);
 CREATE INDEX idx_crew_airline        ON crew (airline_id);

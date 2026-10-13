@@ -1,8 +1,8 @@
 -- =====================================================================
 -- run_all.sql  -  Airline Reservation System : build the whole schema
 --
--- Runs scripts 00-07 in order: drop, schema, data, views, functions,
--- procedures, triggers, package.
+-- Runs scripts 00-08 in order: drop, schema, data, views, functions,
+-- procedures, triggers, package, flight search.
 --
 -- '@@' resolves each file relative to THIS script, so it works from
 -- any working directory:
@@ -39,6 +39,7 @@ PROMPT #####################################################################
 @@05_procedures.sql
 @@06_triggers.sql
 @@07_package.sql
+@@08_flight_search.sql
 
 PROMPT
 PROMPT #####################################################################

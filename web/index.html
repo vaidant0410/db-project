@@ -1,0 +1,851 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Airline Reservation System</title>
+<link rel="stylesheet" href="assets/tui.css">
+<script type="module" src="https://ascii.rest/ascii.js"></script>
+<script src="assets/tui.js"></script>
+<style>
+  /* home */
+  .landing { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--line) 4ch;
+    align-items: center; min-height: calc(100vh - 80px); padding: var(--line) 0; }
+  .globe ascii-art { font-size: 13px; }
+  .title { margin: var(--line) 0 0; font-weight: 400; font-size: 14px; color: var(--dim); letter-spacing: .3em; text-transform: uppercase; }
+
+  .g-search { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 4ch; }
+  .g-book { grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: var(--line) 4ch; }
+  .g-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .panel-gap { margin-bottom: var(--line); }
+  .leg { margin-bottom: calc(var(--line) * 2); }
+  .leg-note { margin-bottom: var(--line); }
+  .fcard.off { opacity: .45; cursor: not-allowed; }
+
+  /* seat map: row number, A B C, aisle, D E F */
+  .seats { display: grid; justify-content: start; }
+  .seat-line { display: grid; grid-template-columns: 3ch repeat(3, 4ch) 2ch repeat(3, 4ch); align-items: center; }
+  .seat-line.head span { color: var(--dim); text-align: center; }
+  .seat-line .rn { color: var(--dim); }
+  .seat-class { color: var(--dim); white-space: pre; overflow: hidden; margin: calc(var(--line) / 2) 0; }
+  .seat-class b { color: var(--fg); font-weight: 400; }
+  .seat { background: none; border: 0; padding: 0; font: inherit; color: var(--fg); cursor: pointer; white-space: pre; text-align: center; }
+  .seat:hover, .seat:focus-visible { color: #000; background: var(--amber); outline: none; }
+  .seat.taken { color: var(--faint); cursor: not-allowed; background: none; }
+  .seat.on { color: #000; background: var(--amber); }
+  .legend { display: flex; flex-wrap: wrap; gap: 0 3ch; color: var(--dim); margin-top: var(--line); }
+
+  /* departures board: split-flap tiles sized to fill the width */
+  .board { overflow: hidden; padding-bottom: 4px; --tile: 15px; }
+  .board-row { display: grid; grid-template-columns: repeat(7, max-content); justify-content: space-between; padding: 3px 0; white-space: nowrap; }
+  .flap { display: inline-flex; gap: 2px; font-size: var(--tile); }
+  .flap i { font-style: normal; width: 1.2em; text-align: center; background: #181818; color: #eee; position: relative; line-height: 1.5; }
+  .flap i::after { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid #000; }
+  .board-row.head .flap i { background: none; color: var(--dim); }
+  .board-row.head .flap i::after { display: none; }
+  .st-on .st .flap i { color: var(--green); } .st-dl .st .flap i { color: var(--amber); } .st-cx .st .flap i { color: var(--red); }
+  #ticker-box { display: block; overflow: hidden; }
+  #ticker { width: max-content; margin: 0 auto; }
+
+  /* destination cards */
+  .dest { cursor: pointer; }
+  .dest .scene { line-height: 0; min-height: 150px; display: flex; align-items: center; justify-content: center; }
+  .dest .scene ascii-art { width: 100%; }
+  .dest .scene.txt ascii-art { width: auto; color: var(--amber); font-size: 6px; line-height: 1; }
+  .dest .meta { display: flex; justify-content: space-between; gap: 2ch; margin-top: var(--line); }
+  .dest:hover > .edge, .dest:focus-visible > .edge { color: var(--amber); }
+  .dest:focus-visible { outline: none; }
+
+  /* boarding passes */
+  .pass-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--line) 4ch; align-items: flex-start; }
+  .pass-top ascii-banner { width: min(520px, 100%); flex: 1 1 320px; }
+
+  /* profile */
+  .stats { display: flex; flex-wrap: wrap; gap: 0 3ch; margin-bottom: var(--line); }
+  .pcard { cursor: default; }
+  .pcard .side { text-align: right; }
+  .pcard .side .actions { justify-content: flex-end; margin-top: calc(var(--line) / 2); }
+
+  @media (max-width: 980px) {
+    .landing, .g-search, .g-book, .g-3 { grid-template-columns: minmax(0, 1fr); }
+    .landing { min-height: 0; }
+    .globe ascii-art { font-size: 8px; }
+  }
+  @media (min-width: 640px) and (max-width: 980px) { .g-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="top">
+    <a class="brand" href="#home">ars</a>
+    <nav class="tabs" aria-label="sections">
+      <a href="#home"><kbd>1</kbd>home</a>
+      <a href="#book"><kbd>2</kbd>book a flight</a>
+      <a href="#departures"><kbd>3</kbd>departures</a>
+      <a href="#destinations"><kbd>4</kbd>hot destinations</a>
+      <a href="#manage"><kbd>5</kbd>manage booking</a>
+      <a href="#profile"><kbd>6</kbd>profile</a>
+    </nav>
+  </header>
+
+  <!-- ═══════════════ 1 · home ═══════════════ -->
+  <section data-tab="home">
+    <div class="landing">
+      <div class="globe center" aria-hidden="true"><ascii-art piece="earth"></ascii-art></div>
+      <div class="stack">
+        <div>
+          <ascii-banner text="ARS" color="#f5a623,#ff6a3d" shadow="rounded" style="max-width: 340px"></ascii-banner>
+          <h1 class="title">airline reservation system</h1>
+        </div>
+        <form class="tui hot" id="quick" data-title="where to?" data-foot="enter search">
+          <div class="row"><span class="cur">&gt;</span><label for="q-from">from</label>
+            <span class="field"><input id="q-from" placeholder="city or code"></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="q-to">to</label>
+            <span class="field"><input id="q-to" placeholder="city or code"></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="q-date">depart</label>
+            <span class="field"><input id="q-date" type="date"></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="q-ret">return</label>
+            <span class="field"><input id="q-ret" type="date" title="leave empty for a one-way trip"></span></div>
+          <div class="actions">
+            <span class="dim" id="q-near"></span>
+            <span class="red" id="q-err"></span>
+            <button class="btn primary" type="submit"> search flights </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 2 · book a flight ═══════════════ -->
+  <section data-tab="book" hidden>
+    <form class="tui hot panel-gap" id="search" data-title="search flights" data-foot="tab next · enter search">
+      <div class="grid g-search" style="margin: 0">
+        <div>
+          <div class="row"><span class="cur">&gt;</span><label for="from">from</label>
+            <span class="field"><input id="from" placeholder="city or code"></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="to">to</label>
+            <span class="field"><input id="to" placeholder="city or code"></span></div>
+          <div class="row"><span class="cur">&gt;</span><span class="lab">trip</span>
+            <span class="radios" id="trip">
+              <label><input type="radio" name="trip" value="oneway" checked>one way</label>
+              <label><input type="radio" name="trip" value="round">round trip</label>
+            </span></div>
+        </div>
+        <div>
+          <div class="row"><span class="cur">&gt;</span><label for="date">depart</label>
+            <span class="field"><input id="date" type="date"></span></div>
+          <div class="row" id="ret-row" hidden><span class="cur">&gt;</span><label for="ret">return</label>
+            <span class="field"><input id="ret" type="date"></span></div>
+          <div class="row"><span class="cur">&gt;</span><span class="lab">class</span>
+            <span class="radios">
+              <label><input type="radio" name="cls" value="ECONOMY" checked>economy</label>
+              <label><input type="radio" name="cls" value="BUSINESS">business</label>
+              <label><input type="radio" name="cls" value="FIRST">first</label>
+            </span></div>
+        </div>
+      </div>
+      <div class="actions">
+        <span class="dim" id="near"></span>
+        <span class="red" id="search-err"></span>
+        <button class="btn" type="button" id="swap">swap</button>
+        <button class="btn primary" type="submit" id="go"> search </button>
+      </div>
+    </form>
+
+    <!-- results: one block of cards per leg -->
+    <div id="results" hidden></div>
+
+    <!-- seat + passenger + payment -->
+    <section class="tui hot panel-gap" id="booking" data-title="book" hidden>
+      <div class="grid g-book" style="margin: 0">
+        <div>
+          <div class="row" id="leg-pick" hidden><span class="cur">&gt;</span><span class="lab">seats for</span>
+            <span class="radios" id="leg-radios"></span></div>
+          <div class="dim" style="margin-bottom: var(--line)">pick a seat, or skip and we assign one</div>
+          <div class="seats" id="seatmap"></div>
+          <div class="legend"><span>[ ] free</span><span>[x] taken</span><span class="amber">[■] yours</span></div>
+        </div>
+        <form id="pax" autocomplete="on">
+          <div class="row"><span class="cur">&gt;</span><label for="fn">first name</label>
+            <span class="field"><input id="fn" autocomplete="given-name" maxlength="30" required></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="ln">last name</label>
+            <span class="field"><input id="ln" autocomplete="family-name" maxlength="30" required></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="em">e-mail</label>
+            <span class="field"><input id="em" type="email" autocomplete="email" maxlength="80" required></span></div>
+          <div class="row"><span class="cur">&gt;</span><label for="ph">phone</label>
+            <span class="field"><input id="ph" type="tel" autocomplete="tel" placeholder="+91 98100 12345" required></span></div>
+          <div class="row"><span class="cur">&gt;</span><span class="lab">pay by</span>
+            <span class="radios">
+              <label><input type="radio" name="pm" value="CARD" checked>card</label>
+              <label><input type="radio" name="pm" value="UPI">upi</label>
+              <label><input type="radio" name="pm" value="NETBANKING">netbanking</label>
+              <label><input type="radio" name="pm" value="WALLET">wallet</label>
+            </span></div>
+          <div class="kv" id="summary" style="margin-top: var(--line)"></div>
+          <div class="actions">
+            <button class="btn" type="button" id="back">back to flights</button>
+            <button class="btn primary" type="submit" id="pay"> confirm and pay </button>
+          </div>
+          <div class="msg red" id="pay-err"></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- boarding passes: one per booking -->
+    <div id="tickets" hidden>
+      <div id="passes" class="stack panel-gap"></div>
+      <div class="actions" style="justify-content: space-between; margin-bottom: var(--line)">
+        <span class="dim" id="ticket-note"></span>
+        <span>
+          <button class="btn" type="button" id="ticket-profile">see it in your profile</button>
+          <button class="btn primary" type="button" id="ticket-again">book another</button>
+        </span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 3 · departures ═══════════════ -->
+  <section data-tab="departures" hidden>
+    <div class="tui panel-gap" id="ticker-box" data-title="live status" data-foot="next departures">
+      <ascii-art id="ticker" piece="marquee" style="font-size: 9px"></ascii-art>
+    </div>
+    <div class="tui panel-gap" data-title="departures board" data-foot="next 7 days · all airports">
+      <ascii-banner text="DEPARTURES" color="#f5a623,#ff6a3d" shadow="rounded" style="max-width: 640px; margin-bottom: 1.25em"></ascii-banner>
+      <div class="board" id="board"><span class="dim">loading…</span></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 4 · hot destinations ═══════════════ -->
+  <section data-tab="destinations" hidden>
+    <div class="sortbar">
+      <span>fares from <span class="amber" id="dest-origin">DEL</span>, a week from today · pick one to see its flights</span>
+    </div>
+    <div class="grid g-3" id="dests"></div>
+  </section>
+
+  <!-- ═══════════════ 5 · manage booking ═══════════════ -->
+  <section data-tab="manage" hidden>
+    <form class="tui hot panel-gap" id="lookup" data-title="find your booking" data-foot="booking number + e-mail" style="max-width: 760px">
+      <div class="row"><span class="cur">&gt;</span><label for="bno">booking no</label>
+        <span class="field"><input id="bno" inputmode="numeric" placeholder="1001"></span></div>
+      <div class="row"><span class="cur">&gt;</span><label for="bem">e-mail</label>
+        <span class="field"><input id="bem" type="email" placeholder="you@example.com"></span></div>
+      <div class="actions"><button class="btn primary" type="submit"> find booking </button></div>
+      <div class="msg" id="lookup-out"></div>
+    </form>
+  </section>
+
+  <!-- ═══════════════ 6 · profile ═══════════════ -->
+  <section data-tab="profile" hidden>
+    <form class="tui hot panel-gap" id="signin" data-title="your profile" data-foot="the e-mail and phone you booked with" style="max-width: 760px">
+      <div class="row"><span class="cur">&gt;</span><label for="p-em">e-mail</label>
+        <span class="field"><input id="p-em" type="email" autocomplete="email" placeholder="you@example.com"></span></div>
+      <div class="row"><span class="cur">&gt;</span><label for="p-ph">phone</label>
+        <span class="field"><input id="p-ph" type="tel" autocomplete="tel" placeholder="+91 98100 12345"></span></div>
+      <div class="actions"><button class="btn primary" type="submit"> show my bookings </button></div>
+      <div class="msg" id="signin-out"></div>
+    </form>
+    <div id="profile" hidden>
+      <div class="sortbar">
+        <span>signed in as <b id="p-who"></b></span>
+        <span style="flex: 1"></span>
+        <button class="btn" type="button" id="p-refresh">refresh</button>
+        <button class="btn" type="button" id="p-out">sign out</button>
+      </div>
+      <div class="stats" id="p-stats"></div>
+      <div class="rule" data-label="upcoming"></div>
+      <div class="cards" id="p-upcoming"></div>
+      <div class="rule" data-label="past and cancelled"></div>
+      <div class="cards" id="p-past"></div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const CLASS_NAME = { ECONOMY: 'economy', BUSINESS: 'business', FIRST: 'first' };
+const state = {
+  cls: 'ECONOMY', home: 'DEL',
+  legs: [],      // [{ from, to, date, flights, pick }] - one per leg of the trip
+  sel: [],       // [{ flight, seats, seat }] - per leg, while booking
+  leg: 0,        // which leg the seat map shows
+  passes: [],    // bookings shown as boarding passes
+};
+let fromPick, toPick, qFrom, qTo;
+
+const SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+function spinner(el, text) {
+  let i = 0;
+  const t = setInterval(() => { el.innerHTML = `<span class="amber">${SPIN[i++ % SPIN.length]}</span> <span class="dim">${text}</span>`; }, 80);
+  return () => clearInterval(t);
+}
+
+// small per-browser memory: who booked last (to pre-fill forms and the profile)
+const remember = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked */ } },
+  drop(k) { try { localStorage.removeItem(k); } catch { /* storage blocked */ } },
+};
+
+// ═════════ search ═════════
+const isRound = () => document.querySelector('input[name=trip]:checked').value === 'round';
+$('trip').addEventListener('change', () => {
+  $('ret-row').hidden = !isRound();
+  if (isRound() && (!$('ret').value || $('ret').value < $('date').value)) $('ret').value = isoDay(new Date(new Date($('date').value).getTime() + 4 * 864e5));
+  TUI.draw($('search'));
+});
+
+async function runSearch() {
+  const err = $('search-err'); err.textContent = '';
+  if (!fromPick.code || !toPick.code) { err.textContent = 'pick both airports'; return; }
+  if (fromPick.code === toPick.code) { err.textContent = 'from and to are the same airport'; return; }
+  if (isRound() && $('ret').value < $('date').value) { err.textContent = 'the return date is before the departure'; return; }
+  state.cls = document.querySelector('input[name=cls]:checked').value;
+
+  state.legs = [{ from: fromPick.code, to: toPick.code, date: $('date').value, flights: [], pick: null }];
+  if (isRound()) state.legs.push({ from: toPick.code, to: fromPick.code, date: $('ret').value, flights: [], pick: null });
+
+  $('booking').hidden = true; $('tickets').hidden = true;
+  const res = $('results');
+  res.hidden = false;
+  res.innerHTML = state.legs.map((l, i) => `
+    <div class="leg" id="leg${i}">
+      <div class="sortbar">
+        <span>${state.legs.length > 1 ? `<span class="amber">${i ? 'return' : 'outbound'}</span> · ` : ''}<b>${l.from} → ${l.to}</b>
+          <span class="dim">· ${longDay(l.date)} · ${CLASS_NAME[state.cls]}</span></span>
+        <span style="flex: 1"></span>
+        <span class="dim">sort</span>
+        <span class="radios" data-sort="${i}">
+          <label><input type="radio" name="sort${i}" value="fare" checked>cheapest</label>
+          <label><input type="radio" name="sort${i}" value="dep">earliest</label>
+          <label><input type="radio" name="sort${i}" value="dur">fastest</label>
+        </span>
+      </div>
+      <div class="leg-note dim" data-note="${i}">${state.legs.length > 1 ? (i ? 'then pick your return flight' : 'pick your outbound flight first') : ''}</div>
+      <div class="cards" data-cards="${i}"></div>
+    </div>`).join('');
+  $('go').disabled = true;
+  await Promise.all(state.legs.map(async (l, i) => {
+    const box = res.querySelector(`[data-cards="${i}"]`);
+    const stop = spinner(box, 'finding flights…');
+    try {
+      l.flights = await api(`/search?from=${l.from}&to=${l.to}&date=${l.date}&cls=${state.cls}`);
+      stop();
+      renderCards(i);
+    } catch (e) {
+      stop();
+      box.innerHTML = `<span class="red">${esc(e.message)}</span>`;
+    }
+  }));
+  $('go').disabled = false;
+}
+
+// a return flight is only possible after the outbound one lands
+const tooEarly = (i, f) => i === 1 && state.legs[0].pick && f.departureTime <= state.legs[0].pick.arrivalTime;
+
+function renderCards(i) {
+  const l = state.legs[i], box = $('results').querySelector(`[data-cards="${i}"]`);
+  if (!box) return;
+  const list = [...l.flights];
+  if (!list.length) {
+    box.innerHTML = `<span class="red">no ${CLASS_NAME[state.cls]} seats left on this day.</span> <span class="dim">try another date or class.</span>`;
+    return;
+  }
+  const cheapest = Math.min(...list.map(f => f.fare)), fastest = Math.min(...list.map(f => f.durationMin));
+  const by = document.querySelector(`input[name=sort${i}]:checked`).value;
+  list.sort((a, b) => by === 'fare' ? a.fare - b.fare : by === 'dur' ? a.durationMin - b.durationMin || a.fare - b.fare
+    : a.departureTime.localeCompare(b.departureTime));
+  box.innerHTML = list.map(f => {
+    const dep = stamp(f.departureTime), arr = stamp(f.arrivalTime);
+    const plus = arr.day !== dep.day ? ' <span class="amber">+1</span>' : '';
+    const tags = [f.fare === cheapest && 'cheapest', f.durationMin === fastest && 'fastest'].filter(Boolean).join(' · ');
+    const left = f.seatsLeft, early = tooEarly(i, f), picked = l.pick && l.pick.flightId === f.flightId;
+    const seats = left <= 5 ? `<span class="red">only ${left} left</span>` : `${left} seats left`;
+    const status = f.status === 'DELAYED' ? '<span class="amber">delayed</span>' : '<span class="green">on time</span>';
+    const action = !left ? '<span class="red">sold out</span>'
+      : early ? '<span class="dim">leaves before you land</span>'
+      : `<button class="btn primary" type="button"> ${picked ? 'picked' : 'select'} </button>`;
+    return `<article class="tui fcard${picked ? ' picked' : ''}${early || !left ? ' off' : ''}" data-leg="${i}" data-id="${f.flightId}" tabindex="0"
+        data-title="${esc(f.airlineName.toLowerCase())}" data-foot="${picked ? 'selected' : tags}">
+      <div class="logo">${airlineLogo(f.airlineCode)}<div class="name">${esc(f.flightNo)}</div></div>
+      <div class="route">
+        <div><div class="t">${dep.time}</div><div class="place"><b>${f.origin}</b> ${esc(f.originCity.toLowerCase())}</div></div>
+        <div class="mid"><div>${duration(f.durationMin)}</div>
+          <div class="track"><span class="dash">${'─'.repeat(80)}</span><span class="tip">▶</span></div>
+          <div>non-stop</div></div>
+        <div><div class="t">${arr.time}${plus}</div><div class="place"><b>${f.destination}</b> ${esc(f.destinationCity.toLowerCase())}</div></div>
+      </div>
+      <div class="price"><div class="amt">${inr(f.fare)}</div><div class="per">per person</div>${action}</div>
+      <div class="facts"><span>${seats}</span><span>${status}</span><span>${CLASS_NAME[state.cls]}</span></div>
+    </article>`;
+  }).join('');
+  TUI.watch(box);
+}
+
+$('results').addEventListener('change', e => { const s = e.target.closest('[data-sort]'); if (s) renderCards(+s.dataset.sort); });
+function pickCard(card) {
+  const i = +card.dataset.leg, l = state.legs[i];
+  const f = l.flights.find(x => x.flightId === +card.dataset.id);
+  if (!f || !f.seatsLeft || tooEarly(i, f)) return;
+  l.pick = f;
+  if (i === 0 && state.legs[1] && state.legs[1].pick && tooEarly(1, state.legs[1].pick)) state.legs[1].pick = null;
+  state.legs.forEach((_, k) => renderCards(k));
+  const note = k => $('results').querySelector(`[data-note="${k}"]`);
+  if (state.legs.length > 1) {
+    note(0).innerHTML = state.legs[0].pick ? `<span class="green">outbound: ${state.legs[0].pick.flightNo} · ${stamp(state.legs[0].pick.departureTime).time}</span>` : 'pick your outbound flight first';
+    note(1).innerHTML = state.legs[1].pick ? `<span class="green">return: ${state.legs[1].pick.flightNo} · ${stamp(state.legs[1].pick.departureTime).time}</span>` : 'now pick your return flight';
+  }
+  const missing = state.legs.findIndex(x => !x.pick);
+  if (missing >= 0) { $('booking').hidden = true; $(`leg${missing}`).scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+  openBooking();
+}
+$('results').addEventListener('click', e => { const c = e.target.closest('.fcard'); if (c) pickCard(c); });
+$('results').addEventListener('keydown', e => { const c = e.target.closest('.fcard'); if (c && e.key === 'Enter') pickCard(c); });
+
+// ═════════ seat maps + checkout ═════════
+const legName = i => state.sel.length > 1 ? (i ? 'return' : 'outbound') : 'flight';
+async function openBooking() {
+  state.sel = state.legs.map(l => ({ flight: l.pick, seats: [], seat: null }));
+  state.leg = 0;
+  const box = $('booking');
+  box.hidden = false;
+  const a = state.sel[0].flight;
+  box.dataset.title = state.sel.length > 1
+    ? `book · round trip · ${a.origin} ⇄ ${a.destination}`
+    : `book · ${a.flightNo} · ${a.origin} → ${a.destination} · ${shortDay(a.departureTime)} ${stamp(a.departureTime).time}`;
+  box.dataset.foot = state.sel.map(s => s.flight.airlineName.toLowerCase()).join(' + ');
+  $('leg-pick').hidden = state.sel.length < 2;
+  $('leg-radios').innerHTML = state.sel.map((s, i) =>
+    `<label><input type="radio" name="leg" value="${i}"${i ? '' : ' checked'}>${s.flight.origin} → ${s.flight.destination}</label>`).join('');
+  $('pay-err').textContent = '';
+  const last = remember.get('ars-traveller');
+  if (last) ['fn', 'ln', 'em', 'ph'].forEach(k => { if (!$(k).value) $(k).value = last[k] || ''; });
+  const stop = spinner($('seatmap'), 'loading seats…');
+  renderSummary();
+  TUI.draw(box);
+  box.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  try {
+    await Promise.all(state.sel.map(async s => { s.seats = await api(`/flights/${s.flight.flightId}/seats`); }));
+    stop();
+    renderSeats();
+  } catch (e) {
+    stop();
+    $('seatmap').innerHTML = `<span class="red">${esc(e.message)}</span>`;
+  }
+  TUI.draw(box);
+}
+$('leg-radios').addEventListener('change', e => { state.leg = +e.target.value; renderSeats(); });
+
+function renderSeats() {
+  const sel = state.sel[state.leg];
+  const byRow = new Map();
+  sel.seats.forEach(s => { if (!byRow.has(s.seatRow)) byRow.set(s.seatRow, []); byRow.get(s.seatRow).push(s); });
+  const cols = ['A', 'B', 'C', '', 'D', 'E', 'F'];
+  let html = `<div class="seat-line head"><span></span>${cols.map(c => `<span>${c}</span>`).join('')}</div>`;
+  let lastClass = '';
+  for (const [row, seats] of byRow) {
+    const cls = seats[0].seatClass;
+    if (cls !== lastClass) {
+      const free = sel.seats.filter(s => s.seatClass === cls && s.status === 'AVAILABLE').length;
+      html += `<div class="seat-class">── <b>${CLASS_NAME[cls]}</b> ${inr(seats[0].fare)} · ${free} free ${'─'.repeat(40)}</div>`;
+      lastClass = cls;
+    }
+    html += `<div class="seat-line"><span class="rn">${row}</span>` + cols.map(c => {
+      if (!c) return '<span></span>';
+      const s = seats.find(x => x.seatLetter === c);
+      if (!s) return '<span></span>';
+      const taken = s.status !== 'AVAILABLE';
+      const on = sel.seat && sel.seat.seatNo === s.seatNo;
+      return `<button type="button" class="seat${taken ? ' taken' : ''}${on ? ' on' : ''}" data-seat="${s.seatNo}" ${taken ? 'disabled' : ''}
+        aria-label="seat ${s.seatNo}, ${CLASS_NAME[s.seatClass]}, ${taken ? 'taken' : inr(s.fare)}">${taken ? '[x]' : on ? '[■]' : '[ ]'}</button>`;
+    }).join('') + '</div>';
+  }
+  $('seatmap').innerHTML = html;
+}
+
+function renderSummary() {
+  let total = 0;
+  $('summary').innerHTML = state.sel.map((s, i) => {
+    const f = s.flight, cls = s.seat ? s.seat.seatClass : state.cls, fare = s.seat ? s.seat.fare : f.fare;
+    total += fare;
+    return `<span>${legName(i)}</span><span>${f.flightNo} · ${esc(f.originCity)} → ${esc(f.destinationCity)}</span>` +
+      `<span></span><span class="dim">${longDay(f.departureTime)} · ${stamp(f.departureTime).time} · ` +
+      `${s.seat ? `seat ${s.seat.seatNo} · ${CLASS_NAME[cls]}` : `auto seat · ${CLASS_NAME[cls]}`} · ${inr(fare)}</span>`;
+  }).join('') + `<span>total</span><span class="amber">${inr(total)}</span>`;
+}
+
+$('seatmap').addEventListener('click', e => {
+  const b = e.target.closest('.seat:not(.taken)');
+  if (!b) return;
+  const sel = state.sel[state.leg];
+  const s = sel.seats.find(x => x.seatNo === b.dataset.seat);
+  sel.seat = sel.seat && sel.seat.seatNo === s.seatNo ? null : s;
+  renderSeats(); renderSummary();
+});
+
+$('back').onclick = () => { $('booking').hidden = true; $('results').scrollIntoView({ behavior: 'smooth' }); };
+
+$('pax').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = $('pay-err'); err.textContent = '';
+  const who = { firstName: $('fn').value, lastName: $('ln').value, email: $('em').value, phone: $('ph').value };
+  const method = document.querySelector('input[name=pm]:checked').value;
+  const legs = state.sel.map(s => ({ flightId: s.flight.flightId, seatClass: s.seat ? s.seat.seatClass : state.cls, seatNo: s.seat ? s.seat.seatNo : null }));
+  const pay = $('pay'); pay.disabled = true; pay.textContent = ' paying… ';
+  try {
+    const made = legs.length > 1
+      ? await api('/bookings/round-trip', { method: 'POST', body: { ...who, method, legs } })
+      : [await api('/bookings', { method: 'POST', body: { ...who, method, ...legs[0] } })];
+    remember.set('ars-traveller', { fn: who.firstName, ln: who.lastName, em: who.email, ph: who.phone });
+    remember.set('ars-profile', { email: who.email.trim(), phone: who.phone });
+    showTickets(made.map((m, i) => ({ ...m, flight: state.sel[i].flight, seatClass: legs[i].seatClass, method, ...who })));
+    boardLoaded = false; profileStale = true;
+  } catch (x) {
+    err.textContent = x.message;
+    if (x.status === 409) {           // someone took a seat: refresh the maps
+      await Promise.all(state.sel.map(async s => { s.seat = null; s.seats = await api(`/flights/${s.flight.flightId}/seats`).catch(() => s.seats); }));
+      renderSeats(); renderSummary();
+    }
+  } finally {
+    pay.disabled = false; pay.textContent = ' confirm and pay ';
+    TUI.draw($('booking'));
+  }
+});
+
+// ═════════ boarding passes ═════════
+function passHtml(p, i, n) {
+  const f = p.flight;
+  return `<section class="tui ok pass" data-booking="${p.bookingId}"
+      data-title="boarding pass${n > 1 ? ` ${i + 1} of ${n}` : ''} · booking ${p.bookingId}" data-foot="confirmed">
+    <div class="pass-top">
+      <ascii-banner text="${f.origin} - ${f.destination}" color="#4ade80,#22c55e" shadow="rounded" effect="type"></ascii-banner>
+      <div class="kv">
+        <span>passenger</span><span>${esc(p.firstName)} ${esc(p.lastName)}</span>
+        <span>booking no</span><span class="green">${p.bookingId}</span>
+        <span>flight</span><span>${f.flightNo} · ${esc(f.airlineName)}</span>
+        <span>from</span><span>${esc(f.originCity)} (${f.origin}) · ${longDay(f.departureTime)} ${stamp(f.departureTime).time}</span>
+        <span>to</span><span>${esc(f.destinationCity)} (${f.destination}) · ${longDay(f.arrivalTime)} ${stamp(f.arrivalTime).time}</span>
+        <span>seat</span><span>${p.seatNo} · ${CLASS_NAME[p.seatClass]}</span>
+        <span>paid</span><span class="amber">${inr(p.amount)} · ${p.method.toLowerCase()}</span>
+      </div>
+    </div>
+  </section>`;
+}
+function showTickets(passes) {
+  state.passes = passes;
+  $('booking').hidden = true; $('results').hidden = true;
+  $('passes').innerHTML = passes.map((p, i) => passHtml(p, i, passes.length)).join('');
+  $('tickets').hidden = false;
+  const ids = passes.map(p => p.bookingId).join(' and ');
+  $('ticket-note').textContent = `booking${passes.length > 1 ? 's' : ''} ${ids} · find ${passes.length > 1 ? 'them' : 'it'} in your profile with ${passes[0].email.trim().toLowerCase()}`;
+  TUI.watch($('passes'));
+  $('tickets').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+$('ticket-profile').onclick = () => goTab('profile');
+$('ticket-again').onclick = () => { $('tickets').hidden = true; state.passes = []; scrollTo(0, 0); $('to').focus(); };
+
+// a cancelled booking loses its boarding pass; with none left, the
+// booking tab goes back to the flight list it showed before
+function onCancelled(bookingId) {
+  boardLoaded = false; profileStale = true;
+  if (!state.passes.some(p => p.bookingId === +bookingId)) return;
+  state.passes = state.passes.filter(p => p.bookingId !== +bookingId);
+  const el = $('passes').querySelector(`[data-booking="${bookingId}"]`);
+  if (el) el.remove();
+  if (!state.passes.length) {
+    $('tickets').hidden = true;
+    if (state.legs.length) runSearch();
+  }
+}
+
+// ═════════ departures board + ticker ═════════
+const FLAP = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const COLS = [['time', 5], ['date', 6], ['flight', 8], ['airline', 15], ['from', 12], ['to', 12], ['status', 9]];
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+let boardLoaded = false;
+function fitBoard() {
+  const b = $('board'), tiles = COLS.reduce((n, c) => n + c[1], 0), gaps = (COLS.length - 1) * 20;
+  if (!b.clientWidth) return;
+  const per = (b.clientWidth - gaps) / tiles;               // px per tile, incl. its 2px gap
+  b.style.setProperty('--tile', Math.max(8, Math.min(22, (per - 2) / 1.2)) + 'px');
+}
+// the marquee sign is a fixed number of columns: scale its font to fill the panel
+function fitTicker() {
+  const t = $('ticker'), pre = t.querySelector('pre'), box = $('ticker-box');
+  if (!pre || !box.clientWidth) return;
+  const room = box.clientWidth - 2 * parseFloat(getComputedStyle(box).paddingLeft);
+  const size = parseFloat(getComputedStyle(t).fontSize), wide = pre.getBoundingClientRect().width;
+  if (wide) t.style.fontSize = Math.min(48, Math.max(6, size * room / wide)) + 'px';
+}
+new MutationObserver(() => requestAnimationFrame(fitTicker)).observe($('ticker'), { childList: true });
+addEventListener('resize', () => { fitBoard(); fitTicker(); });
+function flap(text, n, head) {
+  const chars = String(text).toUpperCase().padEnd(n).slice(0, n).split('');
+  return `<span class="flap">${chars.map(c => `<i data-c="${esc(c)}">${head || reduce ? esc(c) : ' '}</i>`).join('')}</span>`;
+}
+function spin(tiles) {
+  if (reduce) return;
+  tiles.forEach((t, i) => { t.dataset.n = 4 + Math.floor(Math.random() * 8) + (i % 14); });
+  const step = () => {
+    let busy = false;
+    tiles.forEach(t => {
+      const n = +t.dataset.n;
+      if (n > 0) { t.textContent = FLAP[Math.floor(Math.random() * FLAP.length)]; t.dataset.n = n - 1; busy = true; }
+      else t.textContent = t.dataset.c;
+    });
+    if (busy) setTimeout(step, 50);
+  };
+  step();
+}
+async function loadDepartures() {
+  boardLoaded = true;
+  let rows;
+  try { rows = await api('/departures?limit=14'); }
+  catch (e) { $('board').innerHTML = `<span class="red">${esc(e.message)}</span>`; boardLoaded = false; return; }
+  const status = s => s === 'DELAYED' ? 'delayed' : s === 'CANCELLED' ? 'cancelled' : 'on time';
+  $('board').innerHTML =
+    `<div class="board-row head">${COLS.map(([h, n]) => `<span>${flap(h, n, true)}</span>`).join('')}</div>` +
+    rows.map(r => {
+      const st = status(r.status), cls = st === 'delayed' ? 'st-dl' : st === 'cancelled' ? 'st-cx' : 'st-on';
+      const vals = [stamp(r.departureTime).time, shortDay(r.departureTime), r.flightNo, r.airlineName, r.originCity, r.destinationCity];
+      return `<div class="board-row ${cls}">` + vals.map((v, i) => `<span>${flap(v, COLS[i][1])}</span>`).join('') +
+        `<span class="st">${flap(st, 9)}</span></div>`;
+    }).join('');
+  fitBoard();
+  spin([...$('board').querySelectorAll('.board-row:not(.head) .flap i')]);
+  TUI.draw($('board').closest('.tui'));
+  $('ticker').setAttribute('options', JSON.stringify({
+    text: rows.map(r => `${r.flightNo} ${r.origin}-${r.destination} ${stamp(r.departureTime).time} ${status(r.status)}`).join(' · ') + ' · ',
+    speed: 10,
+  }));
+}
+// every few seconds one status flips again, like a real board
+setInterval(() => {
+  const sts = document.querySelectorAll('.board-row:not(.head) .st .flap');
+  if (sts.length && $('board').offsetParent) spin([...sts[Math.floor(Math.random() * sts.length)].querySelectorAll('i')]);
+}, 4000);
+
+// ═════════ hot destinations ═════════
+const DESTS = [
+  ['BOM', 'marine-drive'], ['VNS', 'varanasi-ghats'], ['JAI', 'hawa-mahal', true],
+  ['HND', 'tokyo-rain'], ['KIX', 'kyoto-dusk'], ['DXB', 'desert-night'],
+  ['ZRH', 'alpine-dawn'], ['KEF', 'aurora-fjord'], ['MLE', 'deep-reef'],
+];
+let faresFor = null;
+function renderDests() {
+  $('dests').innerHTML = DESTS.map(([code, piece, text]) => {
+    const a = AIRPORTS.find(x => x.code === code);
+    return `<div class="tui dest" tabindex="0" role="button" data-code="${code}" data-title="${esc(a.city.toLowerCase())}" data-foot="${esc(a.country.toLowerCase())}">
+      <div class="scene${text ? ' txt' : ''}" aria-hidden="true"><ascii-art piece="${piece}"></ascii-art></div>
+      <div class="meta"><span>${code} <span class="dim" data-from></span></span><span class="amber" data-fare>…</span></div>
+    </div>`;
+  }).join('');
+}
+async function loadDestFares() {
+  const origin = fromPick.code || state.home;
+  if (faresFor === origin) return;
+  faresFor = origin;
+  $('dest-origin').textContent = origin;
+  document.querySelectorAll('.dest').forEach(c => {
+    c.querySelector('[data-from]').textContent = `from ${origin}`;
+    c.querySelector('[data-fare]').textContent = c.dataset.code === origin ? 'you are here' : '…';
+  });
+  const codes = DESTS.map(d => d[0]).filter(c => c !== origin);
+  try {
+    const r = await api(`/fares/from/${origin}?to=${codes.join(',')}`);
+    if (faresFor !== origin) return;                        // origin changed meanwhile
+    document.querySelectorAll('.dest').forEach(c => {
+      const v = r.fares[c.dataset.code];
+      if (c.dataset.code !== origin) c.querySelector('[data-fare]').textContent = v ? `from ${inr(v)}` : '—';
+    });
+  } catch { faresFor = null; }
+}
+// a destination card opens its flights from the current "from" airport
+function pickDest(card) {
+  if (card.dataset.code === fromPick.code) return;
+  toPick.setCode(card.dataset.code);
+  $('date').value = isoDay(addDays(7));
+  goTab('book');
+  runSearch();
+}
+$('dests').addEventListener('click', e => { const c = e.target.closest('.dest'); if (c) pickDest(c); });
+$('dests').addEventListener('keydown', e => { const c = e.target.closest('.dest'); if (c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); pickDest(c); } });
+
+// ═════════ cancelling (shared by manage booking and profile) ═════════
+// first press arms the button, the second one cancels
+function cancelButton(btn, note, bookingId, email, after) {
+  btn.onclick = async () => {
+    if (!btn.dataset.armed) { btn.dataset.armed = '1'; btn.textContent = 'yes, cancel it'; note.textContent = 'press again to confirm'; return; }
+    btn.disabled = true;
+    try {
+      await api(`/bookings/${bookingId}/cancel`, { method: 'POST', body: { email } });
+      onCancelled(bookingId);
+      after();
+    } catch (e) { note.innerHTML = `<span class="red">${esc(e.message)}</span>`; btn.disabled = false; }
+  };
+}
+
+// ═════════ manage booking ═════════
+async function findBooking() {
+  const out = $('lookup-out');
+  const id = $('bno').value.trim(), email = $('bem').value.trim();
+  if (!id || !email) { out.innerHTML = '<span class="red">enter the booking number and e-mail</span>'; TUI.draw($('lookup')); return; }
+  const stop = spinner(out, 'looking it up…');
+  try {
+    const b = await api(`/bookings/${encodeURIComponent(id)}?email=${encodeURIComponent(email)}`);
+    stop();
+    renderBooking(b);
+  } catch (e) {
+    stop();
+    out.innerHTML = `<span class="red">${esc(e.message)}</span>`;
+  }
+  TUI.draw($('lookup'));
+}
+function bookingState(b) {
+  if (b.bookingStatus === 'CANCELLED') return ['cancelled', 'red'];
+  if (new Date(b.departureTime) <= Date.now()) return ['flown', 'dim'];
+  return ['confirmed', 'green'];
+}
+function renderBooking(b) {
+  const out = $('lookup-out');
+  const [st, color] = bookingState(b);
+  out.innerHTML = `<div class="kv">` +
+    `<span>status</span><span class="${color}">${st}</span>` +
+    `<span>passenger</span><span>${esc(b.firstName)} ${esc(b.lastName)}</span>` +
+    `<span>flight</span><span>${b.flightNo} · ${esc(b.airlineName)}</span>` +
+    `<span>route</span><span>${esc(b.originCity)} (${b.origin}) → ${esc(b.destinationCity)} (${b.destination})</span>` +
+    `<span>departs</span><span>${longDay(b.departureTime)} · ${stamp(b.departureTime).time}</span>` +
+    `<span>seat</span><span>${b.seatNo} · ${CLASS_NAME[b.seatClass]}</span>` +
+    `<span>paid</span><span class="amber">${inr(b.amount)} · ${String(b.paymentMethod).toLowerCase()}</span></div>` +
+    (st === 'confirmed' ? `<div class="actions" style="justify-content: flex-start"><button class="btn danger" type="button" id="cancel">cancel booking</button>
+      <span class="dim" id="cancel-note"></span></div>` : '');
+  if ($('cancel')) cancelButton($('cancel'), $('cancel-note'), b.bookingId, $('bem').value.trim(), findBooking);
+}
+$('lookup').addEventListener('submit', e => { e.preventDefault(); findBooking(); });
+
+// ═════════ profile ═════════
+let profileStale = true;
+async function loadProfile(who) {
+  const out = $('signin-out');
+  const stop = spinner(out, 'loading your bookings…');
+  try {
+    const rows = await api('/profile', { method: 'POST', body: who });
+    stop(); out.textContent = '';
+    remember.set('ars-profile', who);
+    profileStale = false;
+    renderProfile(who, rows);
+  } catch (e) {
+    stop();
+    out.innerHTML = `<span class="red">${esc(e.message)}</span>`;
+    $('signin').hidden = false; $('profile').hidden = true;
+  }
+  TUI.draw($('signin'));
+}
+function profileCard(b, who) {
+  const [st, color] = bookingState(b);
+  const dep = stamp(b.departureTime), arr = stamp(b.arrivalTime);
+  const plus = arr.day !== dep.day ? ' <span class="amber">+1</span>' : '';
+  return `<article class="tui fcard pcard" data-title="booking ${b.bookingId} · ${longDay(b.departureTime)}" data-foot="${st}">
+    <div class="logo">${airlineLogo(b.airlineCode)}<div class="name">${esc(b.flightNo)}</div></div>
+    <div class="route">
+      <div><div class="t">${dep.time}</div><div class="place"><b>${b.origin}</b> ${esc(b.originCity.toLowerCase())}</div></div>
+      <div class="mid"><div>${esc(b.airlineName.toLowerCase())}</div>
+        <div class="track"><span class="dash">${'─'.repeat(80)}</span><span class="tip">▶</span></div>
+        <div>non-stop</div></div>
+      <div><div class="t">${arr.time}${plus}</div><div class="place"><b>${b.destination}</b> ${esc(b.destinationCity.toLowerCase())}</div></div>
+    </div>
+    <div class="side"><div class="${color}">${st}</div><div class="amber">${inr(b.amount)}</div>
+      ${st === 'confirmed' ? `<div class="actions"><button class="btn danger" type="button" data-cancel="${b.bookingId}">cancel</button></div>` : ''}</div>
+    <div class="facts"><span>${esc(b.firstName)} ${esc(b.lastName)}</span><span>seat ${b.seatNo} · ${CLASS_NAME[b.seatClass]}</span>
+      <span>${String(b.paymentMethod).toLowerCase()}</span><span data-note="${b.bookingId}"></span></div>
+  </article>`;
+}
+function renderProfile(who, rows) {
+  $('signin').hidden = true; $('profile').hidden = false;
+  $('p-who').textContent = who.email.toLowerCase();
+  const upcoming = rows.filter(b => bookingState(b)[0] === 'confirmed');
+  const past = rows.filter(b => bookingState(b)[0] !== 'confirmed').reverse();
+  const flown = past.filter(b => bookingState(b)[0] === 'flown').length;
+  $('p-stats').innerHTML = `<span class="green">${upcoming.length} upcoming</span><span>${flown} flown</span>` +
+    `<span class="red">${past.length - flown} cancelled</span><span class="dim">${rows.length} booking${rows.length === 1 ? '' : 's'} in total</span>`;
+  $('p-upcoming').innerHTML = upcoming.length ? upcoming.map(b => profileCard(b, who)).join('')
+    : '<span class="dim">no upcoming flights. </span><a class="amber" href="#book">book one</a>';
+  $('p-past').innerHTML = past.length ? past.map(b => profileCard(b, who)).join('') : '<span class="dim">nothing here yet</span>';
+  drawRules();
+  TUI.watch($('profile'));
+  $('profile').querySelectorAll('[data-cancel]').forEach(btn =>
+    cancelButton(btn, $('profile').querySelector(`[data-note="${btn.dataset.cancel}"]`), btn.dataset.cancel, who.email, () => loadProfile(who)));
+}
+$('signin').addEventListener('submit', e => {
+  e.preventDefault();
+  const who = { email: $('p-em').value.trim(), phone: $('p-ph').value.trim() };
+  if (!who.email || !who.phone) { $('signin-out').innerHTML = '<span class="red">enter your e-mail and phone</span>'; TUI.draw($('signin')); return; }
+  loadProfile(who);
+});
+$('p-refresh').onclick = () => loadProfile(remember.get('ars-profile'));
+$('p-out').onclick = () => {
+  remember.drop('ars-profile');
+  $('profile').hidden = true; $('signin').hidden = false; $('signin-out').textContent = '';
+  TUI.draw($('signin'));
+};
+
+// ═════════ start ═════════
+(async () => {
+  await loadAirports();
+  [$('q-date'), $('q-ret'), $('date'), $('ret')].forEach(d => { d.min = isoDay(new Date()); d.max = isoDay(addDays(365)); });
+  $('q-date').value = $('date').value = isoDay(addDays(7));
+  $('ret').value = isoDay(addDays(11));
+
+  qFrom = airportPicker($('q-from'));
+  qTo = airportPicker($('q-to'));
+  fromPick = airportPicker($('from'), () => { if (!$('dests').closest('section').hidden) loadDestFares(); else faresFor = null; });
+  toPick = airportPicker($('to'));
+  [qFrom, fromPick].forEach(p => p.setCode(state.home));
+
+  renderDests();
+  const saved = remember.get('ars-profile');
+  if (saved) { $('p-em').value = saved.email; $('p-ph').value = saved.phone; }
+
+  // home search -> book tab (a return date makes it a round trip)
+  $('quick').addEventListener('submit', e => {
+    e.preventDefault();
+    const err = $('q-err'); err.textContent = '';
+    if (!qFrom.code || !qTo.code) { err.textContent = 'pick both airports'; return; }
+    if (qFrom.code === qTo.code) { err.textContent = 'from and to are the same airport'; return; }
+    if ($('q-ret').value && $('q-ret').value < $('q-date').value) { err.textContent = 'the return date is before the departure'; return; }
+    fromPick.setCode(qFrom.code); toPick.setCode(qTo.code); $('date').value = $('q-date').value;
+    document.querySelector(`input[name=trip][value="${$('q-ret').value ? 'round' : 'oneway'}"]`).checked = true;
+    if ($('q-ret').value) $('ret').value = $('q-ret').value;
+    $('ret-row').hidden = !$('q-ret').value;
+    goTab('book');
+    runSearch();
+  });
+  $('swap').onclick = () => { const a = fromPick.code, b = toPick.code; if (b) fromPick.setCode(b); if (a) toPick.setCode(a); };
+  $('search').addEventListener('submit', e => { e.preventDefault(); runSearch(); });
+
+  startTabs(tab => {
+    if (tab === 'departures') { if (!boardLoaded) loadDepartures(); requestAnimationFrame(() => { fitBoard(); fitTicker(); }); }
+    if (tab === 'destinations') loadDestFares();
+    if (tab === 'profile') {
+      const who = remember.get('ars-profile');
+      if (who && (profileStale || $('profile').hidden)) loadProfile(who);
+    }
+  });
+
+  // fill "from" with the airport nearest to the visitor
+  const near = await nearestAirport();
+  if (near) {
+    state.home = near;
+    if (!qFrom.code || qFrom.code === 'DEL') qFrom.setCode(near);
+    if (!fromPick.code || fromPick.code === 'DEL') fromPick.setCode(near);
+    const a = AIRPORTS.find(x => x.code === near);
+    $('q-near').textContent = $('near').textContent = `nearest airport: ${a.city.toLowerCase()}`;
+    faresFor = null;
+    if (location.hash === '#destinations') loadDestFares();
+  }
+})();
+</script>
+</body>
+</html>
