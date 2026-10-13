@@ -2,14 +2,12 @@
 
 A DBMS lab project: the complete database backend of an airline reservation system, written in pure
 **Oracle SQL and PL/SQL** for **Oracle Database 21c Express Edition**, run from **SQL\*Plus**.
-There is no application layer — every rule (pricing, double-booking protection, refunds, auditing)
-lives in the database.
+Every rule (pricing, double-booking protection, refunds, auditing) lives in the database, so a frontend
+or API layer only has to call the procedures / package and read the views.
 
 * **10 entity tables** — airlines, airports, aircraft, flights, passengers, seats, bookings, payments,
   crew, flight_crew (+ `booking_audit_log`)
 * **3 views**, **3 functions**, **3 procedures**, **1 package**, **5 triggers** (one of them a compound trigger)
-* **15 demo queries** covering joins, grouping, subqueries and set operators
-* **An end-to-end demo script** that shows booking, failure handling, rollback and refunds
 
 ---
 
@@ -25,15 +23,11 @@ sql/
   05_procedures.sql  book_ticket, cancel_booking, show_passenger_bookings
   06_triggers.sql    validation, double-booking guard, seat sync, audit log
   07_package.sql     reservation_pkg (optional, bundles the booking API)
-  08_queries.sql     15 demo queries, each introduced by a PROMPT
-  09_demo.sql        end-to-end demo (runs in one transaction, then rolls back)
-  run_all.sql        runs 00 → 09 in order
+  run_all.sql        runs 00 → 07 in order
 docker-compose.yml   Oracle Database Free in a container; the schema is rebuilt on every start
 docker/startdb/      10_rebuild_ars.sh, the script that rebuilds the schema
-demo/                airline_demo.sqlnb (demo notebook for VS Code) and the ER diagrams it shows
-                     (airline_erd_overview.png, airline_erd_detail.png, with .svg sources)
+docs/                ER diagrams (airline_erd_overview.png, airline_erd_detail.png, with .svg sources)
 README.md            this file
-DEMO.md              presentation script and viva questions
 ```
 
 ---
@@ -103,7 +97,7 @@ SQL> @sql/run_all.sql
 ```
 
 `run_all.sql` drops old objects, rebuilds the schema, loads the data, creates views / functions /
-procedures / triggers / package, runs the 15 queries and finishes with the demo. Output is also written to
+procedures / triggers / package, and lists any object that failed to compile. Output is also written to
 `run_all.log` in your current directory.
 
 ### One script at a time
@@ -113,19 +107,18 @@ SQL> @sql/00_drop.sql
 SQL> @sql/01_schema.sql
 SQL> @sql/02_data.sql
 ...
-SQL> @sql/09_demo.sql
+SQL> @sql/07_package.sql
 ```
 
-Scripts `03`–`09` need the earlier ones to have been run. `08_queries.sql` and `09_demo.sql` can be repeated
-as often as you like: the queries only read, and the demo rolls itself back.
+Scripts `03`–`07` need the earlier ones to have been run.
 
 ### Start over
 
 `@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`07`) resets the database to the sample state.
-Do this shortly before presenting: flight dates in the sample data are relative to the moment `02_data.sql`
-runs, and the demo needs flights that have not departed yet.
+Flight dates in the sample data are relative to the moment `02_data.sql` runs, so reload it when the sample
+flights have departed and you need bookable ones again.
 
-### Or: run it in Docker (what the demo uses)
+### Or: run it in Docker (recommended for development)
 
 With [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed, one command starts an Oracle
 Database Free container and builds the schema from `sql/00`–`07` (the schema is rebuilt on **every** start, so the
@@ -143,8 +136,7 @@ on 1521. To reset the data without restarting:
 docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
 ```
 
-To run the demo notebook, install the **Oracle SQL Developer** extension (`Oracle.sql-developer`) in VS Code, add a
-connection to the database above, open `demo/airline_demo.sqlnb`, and run each cell.
+These are the connection details a frontend / API layer should use during development.
 
 ---
 
@@ -188,7 +180,7 @@ bookings ──(trigger)──> booking_audit_log
 
 Identity columns start at **1000**; the sample data uses explicit ids below 1000, so they never collide.
 
-The seat map is deliberately small — **6 seats per flight** (2 premium, 4 economy) — to keep demo output
+The seat map is deliberately small — **6 seats per flight** (2 premium, 4 economy) — to keep sample output
 readable. `aircraft.total_seats` holds the real capacity of the aircraft type.
 
 ---
@@ -255,27 +247,7 @@ same seat.
 
 ---
 
-## 7. What the demo shows (`09_demo.sql`)
-
-1. **Pricing** — base fares, high-load and last-minute uplifts
-2. **Successful booking** — booking + payment + seat + audit row created together
-3. **Double booking blocked** — by the trigger (raw `INSERT`), by the procedure, and by the compound trigger
-4. **Rollback on payment failure** — declined payment and an invalid payment method leave no trace
-5. **Cancellation** — 90 %, 50 % and 10 % refund tiers; errors for repeat cancellation, departed flights and
-   unknown bookings
-6. **Constraint violations** — UNIQUE, CHECK, NOT NULL, FOREIGN KEY, trigger, `ON DELETE SET NULL`,
-   `ON DELETE CASCADE`
-7. **Reports** — passenger history (explicit cursor), audit trail, views, package
-
-The demo runs inside a single transaction and ends with `ROLLBACK TO SAVEPOINT`, so the data is untouched
-afterwards. **The errors it prints (`ORA-20xxx`, `ORA-02290`, …) are expected — they are the demonstration.**
-
-`demo/airline_demo.sqlnb` is the same demo as a notebook for VS Code (see section 4): a short heading and one
-runnable cell per scenario, then the 15 queries, then the structure. `DEMO.md` contains the presentation script and viva questions.
-
----
-
-## 8. Troubleshooting
+## 7. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -286,4 +258,4 @@ runnable cell per scenario, then the 15 queries, then the structure. `DEMO.md` c
 | `ORA-01950: no privileges on tablespace 'USERS'` | the user needs `QUOTA UNLIMITED ON users` |
 | `Warning: … created with compilation errors` | run `SHOW ERRORS` straight after the failing script; the scripts already do this |
 | output wraps or columns look ragged | widen the terminal to at least 200 columns (`mode con cols=200` on Windows cmd) |
-| `ORA-20010` in demo step 4d | the sample data is more than a day old — run `run_all.sql` again |
+| `ORA-20006` / `ORA-20010` on sample flights | the sample data is old and its flights have departed — run `run_all.sql` again |

@@ -2,10 +2,10 @@
 # Rebuilds the ARS schema (sql/00 .. sql/07) inside the FREEPDB1 pluggable database.
 #
 # The container runs this on every start (it is mounted into /container-entrypoint-startdb.d).
-# Run it by hand to reset the data between demos:
+# Run it by hand to reset the data to the sample state:
 #   docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
 #
-# A fresh rebuild keeps the flight dates in 02_data.sql relative to "now", which the demo needs.
+# A fresh rebuild keeps the flight dates in 02_data.sql relative to "now", so there are always future flights to book.
 
 APP_USER="${APP_USER:-ars}"
 APP_PASS="${APP_USER_PASSWORD:-ars_pass}"

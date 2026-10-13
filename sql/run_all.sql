@@ -1,8 +1,8 @@
 -- =====================================================================
--- run_all.sql  -  Airline Reservation System : build everything + demo
+-- run_all.sql  -  Airline Reservation System : build the whole schema
 --
--- Runs scripts 00-09 in order: drop, schema, data, views, functions,
--- procedures, triggers, package, queries, demo.
+-- Runs scripts 00-07 in order: drop, schema, data, views, functions,
+-- procedures, triggers, package.
 --
 -- '@@' resolves each file relative to THIS script, so it works from
 -- any working directory:
@@ -11,7 +11,7 @@
 --
 -- Output is also written to run_all.log in the current directory.
 -- The data set is rebuilt on every run, so flight dates are fresh
--- (the demo relies on flights leaving in the future).
+-- (bookings need flights that have not departed yet).
 -- =====================================================================
 SET ECHO OFF
 SET SERVEROUTPUT ON SIZE UNLIMITED FORMAT WRAPPED
@@ -53,9 +53,6 @@ SELECT object_name, object_type, status
  ORDER BY object_type, object_name;
 PROMPT (no rows selected above means every object compiled cleanly)
 CLEAR COLUMNS
-
-@@08_queries.sql
-@@09_demo.sql
 
 PROMPT
 PROMPT #####################################################################
