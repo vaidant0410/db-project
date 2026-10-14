@@ -198,12 +198,12 @@ app.post('/api/bookings/:id/cancel', route(async (req, res) => {
   res.json({ refund });
 }));
 
-// next departures for the board
+// the departures board: the last hour's departures, then what leaves next
 app.get('/api/departures', route(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 14, 50);
   const rows = await db(c => c.execute(
     `SELECT flight_no, airline_name, origin, origin_city, destination, destination_city,
-            departure_time, status
+            departure_time, board_status AS status
        FROM departures_board
       ORDER BY departure_time
       FETCH FIRST :n ROWS ONLY`, { n: limit }));

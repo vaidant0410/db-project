@@ -747,7 +747,8 @@ END flight_search_pkg;
 SHOW ERRORS
 
 -- ---------------------------------------------------------------------
--- departures_board : what the airport screens show, next 7 days
+-- departures_board : what the airport screens show: flights that left
+-- in the last hour or leave in the next 24 hours
 -- ---------------------------------------------------------------------
 CREATE OR REPLACE VIEW departures_board AS
 SELECT f.flight_id,
@@ -758,13 +759,21 @@ SELECT f.flight_id,
        d.iata_code  AS destination,
        d.city       AS destination_city,
        f.departure_time,
-       f.status
+       f.status,
+       -- what an airport screen shows right now
+       CASE
+         WHEN f.status = 'CANCELLED'                 THEN 'CANCELLED'
+         WHEN f.departure_time <= SYSDATE            THEN 'DEPARTED'
+         WHEN f.departure_time <= SYSDATE + 40 / 1440 THEN 'BOARDING'
+         ELSE f.status
+       END AS board_status
   FROM flights f
   JOIN airlines al ON al.airline_id = f.airline_id
   JOIN airports o  ON o.airport_id  = f.origin_airport_id
   JOIN airports d  ON d.airport_id  = f.dest_airport_id
- WHERE f.departure_time > SYSDATE
-   AND f.departure_time < SYSDATE + 7;
+ -- left in the last hour, or leaves in the next 24 hours
+ WHERE f.departure_time > SYSDATE - 1 / 24
+   AND f.departure_time < SYSDATE + 1;
 
 -- ---------------------------------------------------------------------
 -- Self-test (read-only: the database starts with no flights, and this
