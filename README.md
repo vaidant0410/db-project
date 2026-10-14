@@ -1,14 +1,95 @@
 # Airline Reservation System — Oracle SQL / PL/SQL backend
 
-A DBMS lab project: an airline reservation system whose backend is written in pure
-**Oracle SQL and PL/SQL** (Oracle Database 21c XE, or Oracle Database Free in Docker).
-Every rule (pricing, flight generation, double-booking protection, refunds, auditing) lives in the database.
-A small Node.js API (`api/`) turns HTTP requests into procedure calls and serves the web frontend (`web/`).
+A DBMS lab project: an airline reservation website whose backend is written in **Oracle SQL and PL/SQL**.
+Every rule (pricing, flight generation, double-booking protection, refunds, auditing) lives in the database;
+a small Node.js API (`api/`) turns web requests into procedure calls and serves the website (`web/`).
 
-* **7 entity tables** — airlines, airports, flights, passengers, seats, bookings, payments
-  (+ `booking_audit_log`)
-* **143 airports** worldwide and **90 airlines**: a search between **any two airports** generates flights on demand
-* **4 views**, **3 functions**, **3 procedures**, **2 packages**, **5 triggers** (one of them a compound trigger)
+* Search between **any two of 143 airports** — flights are generated on demand by PL/SQL
+* Pick a seat, book one-way or round trip, manage and cancel bookings, see them all in a profile
+* **7 entity tables** + an audit log, **4 views**, **3 functions**, **3 procedures**, **2 packages**,
+  **5 triggers** (one of them a compound trigger)
+
+---
+
+## Quick start
+
+You need two programs. Nothing else — no Oracle installation, no database setup.
+
+| Install | Where |
+|---|---|
+| **Docker Desktop** | <https://www.docker.com/products/docker-desktop/> — after installing, start it and wait until it says *Engine running* |
+| **Node.js 18 or newer** | <https://nodejs.org> (the LTS version) |
+
+**1. Get the code.** Either clone it:
+
+```
+git clone https://github.com/vaidant0410/db-project.git
+cd db-project
+```
+
+or, without Git, download the ZIP (on GitHub: **Code → Download ZIP**), unzip it and open a terminal in the
+unzipped folder.
+
+**2. Start the database.** In the project folder:
+
+```
+docker compose up -d --wait
+```
+
+The first time, this downloads Oracle Database Free (about 2.8 GB) and builds the database from the scripts in
+`sql/`, which takes a few minutes. It returns when the database is ready. Later starts take seconds.
+
+**3. Start the website.** In the same terminal:
+
+```
+cd api
+npm install
+npm start
+```
+
+Wait for `ARS running on http://localhost:3000`.
+
+**4. Open <http://localhost:3000>** in your browser. Search a route, pick a flight, book it.
+
+The database starts **empty** apart from 90 airlines and 143 airports. Flights appear when a route is first
+searched; passengers, bookings and payments when someone books — every row comes from using the website.
+
+### Every day after that
+
+| To … | Run (in the project folder) |
+|---|---|
+| stop the website | press **Ctrl+C** in the terminal running `npm start` |
+| stop the database | `docker compose stop` |
+| start everything again | `docker compose up -d --wait`, then `cd api` and `npm start` |
+| wipe all bookings and flights, keep airlines and airports | `docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh --reset` |
+| remove the database completely | `docker compose down -v` |
+
+Your data is kept when you stop and start again, and across reboots.
+
+### Look inside the database
+
+Use **Oracle SQL Developer** (desktop app, or the *Oracle SQL Developer* extension for VS Code) and create a
+connection with:
+
+| Field | Value |
+|---|---|
+| Username / password | `ars` / `ars_pass` |
+| Host / port | `localhost` / `1522` |
+| Service name | `FREEPDB1` |
+
+Open a table and switch to its **Data** tab; press refresh after using the website to see the new rows.
+Or use SQL\*Plus inside the container: `docker compose exec oracle sqlplus ars/ars_pass@//localhost:1521/FREEPDB1`.
+
+### If something goes wrong
+
+| Problem | Fix |
+|---|---|
+| `error during connect` / `cannot find ... dockerDesktopLinuxEngine` | Docker Desktop is not running — start it and wait for *Engine running* |
+| `npm start` says `Could not connect to the database` | the database is not up yet — run `docker compose up -d --wait` first |
+| `port is already allocated` (1522) or `EADDRINUSE` (3000) | something else uses the port — change `"1522:1521"` in `docker-compose.yml`, or start the website with another port: `PORT=3001 npm start` (PowerShell: `$env:PORT=3001; npm start`) |
+| the page has no ascii art and a plain font | the computer is offline — the font and the art load from the internet; everything else still works |
+| `docker compose up` waits a long time the first time | normal: the image download and the first build take a few minutes |
+| times look off | the database runs on Indian time (`TZ: Asia/Kolkata` in `docker-compose.yml`); change it there |
 
 ---
 
@@ -31,132 +112,59 @@ web/                 index.html: one page with six tabs (home, book a flight, de
                      hot destinations, manage booking, profile); assets/ holds the shared styles and scripts.
                      The animated ascii art comes from ascii.rest (MIT licence).
 docker-compose.yml   Oracle Database Free in a container; the schema is built on the first start
-docker/startdb/      10_rebuild_ars.sh, the script that rebuilds the schema
+docker/startdb/      10_rebuild_ars.sh, the script that builds (or with --reset, rebuilds) the schema
 docs/                ER diagrams (airline_erd_overview.png, airline_erd_detail.png, with .svg sources)
 README.md            this file
 ```
 
 ---
 
-## 2. Install Oracle Database 21c XE
+## 2. Running without Docker (optional)
 
-1. Download **Oracle Database 21c Express Edition** for your OS from
+Only needed if you would rather install Oracle yourself, e.g. **Oracle Database 21c XE**.
+
+1. Download Oracle Database 21c Express Edition from
    <https://www.oracle.com/database/technologies/xe-downloads.html> (an Oracle account is required).
-2. **Windows:** unzip the download and run `setup.exe`. When asked, choose a password — it is used for the
-   `SYS`, `SYSTEM` and `PDBADMIN` accounts. Keep the default port **1521**.
+   **Windows:** unzip it and run `setup.exe`; choose a password for `SYS` / `SYSTEM` and keep port **1521**.
    **Linux:** install the preinstall package and the `oracle-database-xe-21c` RPM, then run
-   `sudo /etc/init.d/oracle-xe-21c configure`.
-3. The installer creates the database service and the listener and starts them. On Windows, check that the
-   services **OracleServiceXE** and **OracleOraDB21Home1TNSListener** are *Running* (`services.msc`).
-4. SQL\*Plus is installed together with the database. On Windows it is in
-   `C:\app\<your-user>\product\21c\dbhomeXE\bin\` — add that folder to your `PATH`, or run it by full path.
+   `sudo /etc/init.d/oracle-xe-21c configure`. SQL\*Plus is installed with the database.
+2. Create the project user in the pluggable database **`XEPDB1`** (once):
 
-XE contains one container database (`XE`) and one pluggable database, **`XEPDB1`**. Work in `XEPDB1`.
+   ```
+   sqlplus system/YourPassword@//localhost:1521/XEPDB1
+   ```
 
----
+   ```sql
+   CREATE USER ars IDENTIFIED BY ars_pass
+     DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;
+   GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE,
+         CREATE PROCEDURE, CREATE TRIGGER TO ars;
+   EXIT
+   ```
 
-## 3. Connect with SQL\*Plus and create the project user
+   If `CREATE USER` fails with **ORA-65096**, you are connected to the container root (`XE`) instead of `XEPDB1`.
+3. Build the schema from the project folder (this also resets it to empty whenever you run it again):
 
-Connect to the pluggable database as `SYSTEM` (replace the password with the one from installation):
+   ```
+   sqlplus ars/ars_pass@//localhost:1521/XEPDB1 @sql/run_all.sql
+   ```
 
-```
-sqlplus system/YourPassword@//localhost:1521/XEPDB1
-```
+   `run_all.sql` runs `00` → `08` in order, lists any object that failed to compile, and writes `run_all.log`.
+4. Start the website against this database. In `api/`:
 
-Create a dedicated user for the project (do this once):
+   ```
+   npm install
+   DB_CONNECT=localhost:1521/XEPDB1 npm start
+   ```
 
-```sql
-CREATE USER ars IDENTIFIED BY ars_pass
-  DEFAULT TABLESPACE users QUOTA UNLIMITED ON users;
-
-GRANT CREATE SESSION, CREATE TABLE, CREATE VIEW, CREATE SEQUENCE,
-      CREATE PROCEDURE, CREATE TRIGGER TO ars;
-
-EXIT
-```
-
-> If `CREATE USER` fails with **ORA-65096: invalid common user or role name**, you are connected to the
-> container root (`XE`) instead of `XEPDB1` — check the service name in the connect string.
-
-Now connect as the project user:
-
-```
-sqlplus ars/ars_pass@//localhost:1521/XEPDB1
-```
+   (PowerShell: `$env:DB_CONNECT="localhost:1521/XEPDB1"; npm start`.) On Oracle 23ai Free the service is `FREEPDB1`.
 
 ---
 
-## 4. Run the project
+## 3. The API
 
-### Everything in one go
-
-From the repository root (or from anywhere — `run_all.sql` locates its sibling scripts itself):
-
-```
-sqlplus ars/ars_pass@//localhost:1521/XEPDB1 @sql/run_all.sql
-```
-
-or, from inside an SQL\*Plus session:
-
-```
-SQL> @sql/run_all.sql
-```
-
-`run_all.sql` drops old objects, rebuilds the schema, loads the data, creates views / functions /
-procedures / triggers / package, and lists any object that failed to compile. Output is also written to
-`run_all.log` in your current directory.
-
-### One script at a time
-
-```
-SQL> @sql/00_drop.sql
-SQL> @sql/01_schema.sql
-SQL> @sql/02_reference_data.sql
-...
-SQL> @sql/07_package.sql
-```
-
-Scripts `03`–`07` need the earlier ones to have been run.
-
-### Start over
-
-`@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`08`) resets the database to its starting state:
-airlines and airports only. There is no sample data — flights appear when a route is first searched, and passengers,
-bookings and payments when people book, so every row in the database comes from using the system.
-
-### Or: run it in Docker (recommended for development)
-
-With [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed, one command starts an Oracle
-Database Free container and builds the schema from `sql/00`–`08` on the first start. Later starts keep all data
-(flights, passengers, bookings):
-
-```
-docker compose up -d --wait
-```
-
-Connect with `ars` / `ars_pass` at `localhost:1522`, service name `FREEPDB1`
-(`sqlplus ars/ars_pass@//localhost:1522/FREEPDB1`). Port 1522 is used so it does not clash with a local Oracle XE
-on 1521. To wipe everything and start again from an empty database:
-
-```
-docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh --reset
-```
-
-These are the connection details the API uses during development. The container runs on Indian time
-(`TZ: Asia/Kolkata`), so `SYSDATE` matches the clock of the people booking.
-
-### Run the website
-
-With the database running, start the API (Node.js 18 or newer):
-
-```
-cd api
-npm install
-npm start
-```
-
-Then open <http://localhost:3000>. The API reads `DB_USER`, `DB_PASSWORD`, `DB_CONNECT` and `PORT` from the
-environment; the defaults match the Docker database.
+The API reads `DB_USER`, `DB_PASSWORD`, `DB_CONNECT` and `PORT` from the environment; the defaults
+(`ars`, `ars_pass`, `localhost:1522/FREEPDB1`, `3000`) match the Docker database.
 
 | Endpoint | Calls |
 |---|---|
@@ -176,7 +184,7 @@ Errors raised by the packages (`ORA-20xxx`) come back as JSON `{error, code}` wi
 
 ---
 
-## 5. Data model
+## 4. Data model
 
 ```
 airlines 1───< flights >───1 airports (origin)
@@ -217,7 +225,7 @@ Every flight is generated by `flight_search_pkg` and has 70 seats: 1 first-class
 
 ---
 
-## 6. Business rules
+## 5. Business rules
 
 **Fare** — `calculate_fare(flight_id, seat_class)`
 
@@ -320,14 +328,14 @@ same seat.
 
 ---
 
-## 7. Troubleshooting
+## 6. Troubleshooting (manual Oracle install)
 
 | Symptom | Cause / fix |
 |---|---|
 | `SP2-0310: unable to open file "sql/run_all.sql"` | you are in a different folder; use the correct relative path or an absolute path |
 | `ORA-12514` / `ORA-12541` | listener not running or wrong service name; use `localhost:1521/XEPDB1` and start the `OracleServiceXE` and listener services |
 | `ORA-01017: invalid username/password` | wrong password, or the user was created in the container root instead of `XEPDB1` |
-| `ORA-01031: insufficient privileges` on `CREATE …` | run the `GRANT` statement from section 3 |
+| `ORA-01031: insufficient privileges` on `CREATE …` | run the `GRANT` statement from section 2 |
 | `ORA-01950: no privileges on tablespace 'USERS'` | the user needs `QUOTA UNLIMITED ON users` |
 | `Warning: … created with compilation errors` | run `SHOW ERRORS` straight after the failing script; the scripts already do this |
 | output wraps or columns look ragged | widen the terminal to at least 200 columns (`mode con cols=200` on Windows cmd) |
