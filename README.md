@@ -5,8 +5,8 @@ A DBMS lab project: an airline reservation system whose backend is written in pu
 Every rule (pricing, flight generation, double-booking protection, refunds, auditing) lives in the database.
 A small Node.js API (`api/`) turns HTTP requests into procedure calls and serves the web frontend (`web/`).
 
-* **10 entity tables** — airlines, airports, aircraft, flights, passengers, seats, bookings, payments,
-  crew, flight_crew (+ `booking_audit_log`)
+* **7 entity tables** — airlines, airports, flights, passengers, seats, bookings, payments
+  (+ `booking_audit_log`)
 * **143 airports** worldwide and **90 airlines**: a search between **any two airports** generates flights on demand
 * **4 views**, **3 functions**, **3 procedures**, **2 packages**, **5 triggers** (one of them a compound trigger)
 
@@ -18,7 +18,7 @@ A small Node.js API (`api/`) turns HTTP requests into procedure calls and serves
 sql/
   00_drop.sql        drop every project object (safe to run on an empty schema)
   01_schema.sql      tables, keys, constraints, indexes
-  02_data.sql        sample data (Indian airlines and airports), ends with COMMIT
+  02_reference_data.sql  90 airlines and 143 airports; no flights, passengers or bookings
   03_views.sql       available_seats, passenger_itinerary, airline_revenue
   04_functions.sql   calculate_fare, seats_left, refund_percentage
   05_procedures.sql  book_ticket, cancel_booking, show_passenger_bookings
@@ -30,7 +30,7 @@ api/                 server.js: Express + node-oracledb, the HTTP API; also serv
 web/                 index.html: one page with six tabs (home, book a flight, departures,
                      hot destinations, manage booking, profile); assets/ holds the shared styles and scripts.
                      The animated ascii art comes from ascii.rest (MIT licence).
-docker-compose.yml   Oracle Database Free in a container; the schema is rebuilt on every start
+docker-compose.yml   Oracle Database Free in a container; the schema is built on the first start
 docker/startdb/      10_rebuild_ars.sh, the script that rebuilds the schema
 docs/                ER diagrams (airline_erd_overview.png, airline_erd_detail.png, with .svg sources)
 README.md            this file
@@ -111,7 +111,7 @@ procedures / triggers / package, and lists any object that failed to compile. Ou
 ```
 SQL> @sql/00_drop.sql
 SQL> @sql/01_schema.sql
-SQL> @sql/02_data.sql
+SQL> @sql/02_reference_data.sql
 ...
 SQL> @sql/07_package.sql
 ```
@@ -120,15 +120,15 @@ Scripts `03`–`07` need the earlier ones to have been run.
 
 ### Start over
 
-`@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`08`) resets the database to the sample state.
-Flight dates in the sample data are relative to the moment `02_data.sql` runs, so reload it when the sample
-flights have departed and you need bookable ones again.
+`@sql/run_all.sql` (or just `@sql/00_drop.sql` followed by `01`…`08`) resets the database to its starting state:
+airlines and airports only. There is no sample data — flights appear when a route is first searched, and passengers,
+bookings and payments when people book, so every row in the database comes from using the system.
 
 ### Or: run it in Docker (recommended for development)
 
 With [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed, one command starts an Oracle
-Database Free container and builds the schema from `sql/00`–`08` (the schema is rebuilt on **every** start, so the
-flight dates are always fresh):
+Database Free container and builds the schema from `sql/00`–`08` on the first start. Later starts keep all data
+(flights, passengers, bookings):
 
 ```
 docker compose up -d --wait
@@ -136,10 +136,10 @@ docker compose up -d --wait
 
 Connect with `ars` / `ars_pass` at `localhost:1522`, service name `FREEPDB1`
 (`sqlplus ars/ars_pass@//localhost:1522/FREEPDB1`). Port 1522 is used so it does not clash with a local Oracle XE
-on 1521. To reset the data without restarting:
+on 1521. To wipe everything and start again from an empty database:
 
 ```
-docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh
+docker compose exec oracle bash /container-entrypoint-startdb.d/10_rebuild_ars.sh --reset
 ```
 
 These are the connection details the API uses during development. The container runs on Indian time
@@ -169,7 +169,7 @@ environment; the defaults match the Docker database.
 | `POST /api/bookings/:id/cancel` `{email}` | `flight_search_pkg.cancel_my_booking`, then `COMMIT` |
 | `POST /api/profile` `{email, phone}` | `flight_search_pkg.my_bookings` (all past and future bookings of that e-mail) |
 | `GET /api/departures?limit=14` | `departures_board` view |
-| `GET /api/fares/from/:origin?to=BOM,DXB` | cheapest economy fare a week out, per destination |
+| `GET /api/fares/from/:origin?to=BOM,DXB` | `flight_search_pkg.fare_from`: lowest possible fare per destination (read-only, creates no flights) |
 
 Errors raised by the packages (`ORA-20xxx`) come back as JSON `{error, code}` with a matching HTTP status
 (404 not found, 409 conflict, 400 bad input, 422 not bookable, 402 payment declined).
@@ -179,12 +179,11 @@ Errors raised by the packages (`ORA-20xxx`) come back as JSON `{error, code}` wi
 ## 5. Data model
 
 ```
-airlines 1───< aircraft 1───< flights >───1 airports (origin)
-    │  └──────────────────────────^  └──────1 airports (destination)
-    │
-    ├───< crew >───< flight_crew >───  flights          (many-to-many)
-    │
-    └───< flights 1───< seats 1───< bookings >───1 passengers
+airlines 1───< flights >───1 airports (origin)
+                  │   └─────1 airports (destination)
+                  1
+                  │
+                  └───< seats 1───< bookings >───1 passengers
                                        │
                                        1
                                        │
@@ -197,28 +196,24 @@ bookings ──(trigger)──> booking_audit_log
 |---|---|---|
 | `airlines` | carriers | unique 2-character IATA code and name; `network` DOMESTIC / REGIONAL / GLOBAL; `fare_factor` 0.5–2 |
 | `airports` | airports | unique 3-letter IATA code; latitude / longitude for distances |
-| `aircraft` | fleet | unique registration, status ACTIVE / MAINTENANCE / RETIRED |
 | `flights` | scheduled flights | origin ≠ destination (CHECK), departure < arrival (trigger), unique (flight_no, departure) |
 | `passengers` | customers | unique (e-mail, first name, last name), so one e-mail can book for a family; phone 7–15 digits with an optional `+`; date of birth, gender and passport optional |
 | `seats` | seat inventory per flight | class ECONOMY / BUSINESS / FIRST, status AVAILABLE / BOOKED, unique (flight, seat_no) |
 | `bookings` | a passenger holding a seat | status CONFIRMED / CANCELLED; the flight is reached through the seat (3NF) |
 | `payments` | money in and out | one per booking, refund ≤ amount |
-| `crew`, `flight_crew` | staff and their assignments | junction table with composite primary key |
 | `booking_audit_log` | history of every booking change | no foreign key, so it survives deletions |
 
 **Referential actions**
 
 | Action | Where |
 |---|---|
-| `ON DELETE CASCADE` | airline → aircraft, flights, crew · flight → seats, flight_crew · passenger → bookings · booking → payment · crew → flight_crew |
-| `ON DELETE SET NULL` | `flights.aircraft_id` (an aircraft can be retired while its flight history stays) |
+| `ON DELETE CASCADE` | airline → flights · flight → seats · passenger → bookings · booking → payment |
 | no action (restrict) | airports in use, and `bookings.seat_id` — a flight that still has bookings cannot be deleted |
 
-Identity columns start at **1000**; the sample data uses explicit ids below 1000, so they never collide.
+Identity columns start at **1000**; the reference data uses explicit ids below 1000, so they never collide.
 
-The 15 hand-written sample flights have a small seat map — **6 seats per flight** (2 premium, 4 economy) — to
-keep sample output readable. Generated flights have 68 seats (2 business rows, 10 economy rows), or 70 with a
-first-class row from 4,000 km. `aircraft.total_seats` holds the real capacity of the aircraft type.
+Every flight is generated by `flight_search_pkg` and has 70 seats: 1 first-class row (2 seats), 2 business rows
+(8 seats) and 10 economy rows (60 seats). Flights of 4,000 km or more get a second first-class row (72 seats).
 
 ---
 
@@ -258,7 +253,7 @@ airlines  = domestic route: the airlines of that country
                                  + GLOBAL airlines from elsewhere (40 %)
             low-cost carriers (fare_factor < 0.90) only up to 5,000 km
 base fare = (1,500 + 4.8 INR per km) x airline fare_factor x 0.85-1.15, rounded to 10 INR
-seats     = 15-80 % already sold through other channels
+seats     = 15-80 % already sold through other channels (first class half as much)
 ```
 
 `DBMS_RANDOM` is seeded with route + date, so the same search always gives the same flights. Generated flights
@@ -336,4 +331,4 @@ same seat.
 | `ORA-01950: no privileges on tablespace 'USERS'` | the user needs `QUOTA UNLIMITED ON users` |
 | `Warning: … created with compilation errors` | run `SHOW ERRORS` straight after the failing script; the scripts already do this |
 | output wraps or columns look ragged | widen the terminal to at least 200 columns (`mode con cols=200` on Windows cmd) |
-| `ORA-20006` / `ORA-20010` on sample flights | the sample data is old and its flights have departed — run `run_all.sql` again |
+| `ORA-20006` / `ORA-20010` | the flight has already departed — search a later date |

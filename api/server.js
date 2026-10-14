@@ -210,25 +210,22 @@ app.get('/api/departures', route(async (req, res) => {
   res.json(rows.rows.map(camel));
 }));
 
-// cheapest economy fare a week out, for the destination cards
+// lowest possible fare per destination, for the destination cards.
+// Read-only (flight_search_pkg.fare_from): browsing never creates flights.
 app.get('/api/fares/from/:origin', route(async (req, res) => {
   const to = String(req.query.to || '').split(',').filter(Boolean).slice(0, 12);
-  const date = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const result = {};
   await db(async c => {
     for (const dest of to) {
       try {
-        const r = await c.execute(
-          `BEGIN flight_search_pkg.search_flights(:o, :d, TO_DATE(:dt, 'YYYY-MM-DD'), 'ECONOMY', :rc); END;`,
-          { o: req.params.origin, d: dest, dt: date, rc: { dir: oracledb.BIND_OUT, type: oracledb.CURSOR } });
-        const flights = await readCursor(r.outBinds.rc);
-        result[dest] = flights.length ? Math.min(...flights.map(f => f.fare)) : null;
+        const r = await c.execute(`SELECT flight_search_pkg.fare_from(:o, :d) AS fare FROM dual`, { o: req.params.origin, d: dest });
+        result[dest] = r.rows[0].FARE;
       } catch {
         result[dest] = null;
       }
     }
   });
-  res.json({ date, fares: result });
+  res.json({ fares: result });
 }));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'No such endpoint.' }));

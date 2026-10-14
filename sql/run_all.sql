@@ -1,8 +1,8 @@
 -- =====================================================================
 -- run_all.sql  -  Airline Reservation System : build the whole schema
 --
--- Runs scripts 00-08 in order: drop, schema, data, views, functions,
--- procedures, triggers, package, flight search.
+-- Runs scripts 00-08 in order: drop, schema, reference data, views,
+-- functions, procedures, triggers, package, flight search.
 --
 -- '@@' resolves each file relative to THIS script, so it works from
 -- any working directory:
@@ -10,8 +10,8 @@
 --     SQL> @run_all.sql            (when you are inside the sql folder)
 --
 -- Output is also written to run_all.log in the current directory.
--- The data set is rebuilt on every run, so flight dates are fresh
--- (bookings need flights that have not departed yet).
+-- It starts from an empty database: everything except airlines and
+-- airports (flights, passengers, bookings ...) is deleted.
 -- =====================================================================
 SET ECHO OFF
 SET SERVEROUTPUT ON SIZE UNLIMITED FORMAT WRAPPED
@@ -33,7 +33,7 @@ PROMPT #####################################################################
 
 @@00_drop.sql
 @@01_schema.sql
-@@02_data.sql
+@@02_reference_data.sql
 @@03_views.sql
 @@04_functions.sql
 @@05_procedures.sql

@@ -70,17 +70,19 @@ BEGIN
 
   -- tables, children before parents; CASCADE CONSTRAINTS makes the
   -- order forgiving and PURGE skips the recycle bin
-  drop_it('DROP TABLE flight_crew CASCADE CONSTRAINTS PURGE');
-  drop_it('DROP TABLE crew CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE payments CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE booking_audit_log CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE bookings CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE seats CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE flights CASCADE CONSTRAINTS PURGE');
-  drop_it('DROP TABLE aircraft CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE passengers CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE airports CASCADE CONSTRAINTS PURGE');
   drop_it('DROP TABLE airlines CASCADE CONSTRAINTS PURGE');
+
+  -- tables that older versions of these scripts created
+  drop_it('DROP TABLE flight_crew CASCADE CONSTRAINTS PURGE');
+  drop_it('DROP TABLE crew CASCADE CONSTRAINTS PURGE');
+  drop_it('DROP TABLE aircraft CASCADE CONSTRAINTS PURGE');
 
   DBMS_OUTPUT.PUT_LINE('Cleanup complete: ' || v_dropped || ' object(s) dropped.');
 END;

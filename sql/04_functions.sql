@@ -152,23 +152,8 @@ END refund_percentage;
 SHOW ERRORS
 
 -- ---------------------------------------------------------------------
--- Quick self-test
+-- Quick self-test (needs no data: the database starts empty)
 -- ---------------------------------------------------------------------
-PROMPT
-PROMPT Self-test: seats_left and calculate_fare for a few flights
-COLUMN flight_no   FORMAT A10
-COLUMN seats_left  FORMAT 99        HEADING 'SEATS|LEFT'
-COLUMN economy     FORMAT 999,990.00
-COLUMN business    FORMAT 999,990.00
-SELECT flight_no,
-       seats_left(flight_id)                  AS seats_left,
-       calculate_fare(flight_id, 'ECONOMY')   AS economy,
-       calculate_fare(flight_id, 'BUSINESS')  AS business
-  FROM flights
- WHERE flight_id IN (1, 2, 13)
- ORDER BY flight_id;
-CLEAR COLUMNS
-
 PROMPT
 PROMPT Self-test: refund_percentage(hours before departure)
 SELECT refund_percentage(100) AS at_100h,

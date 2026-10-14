@@ -440,18 +440,10 @@ END reservation_pkg;
 SHOW ERRORS
 
 -- ---------------------------------------------------------------------
--- Self-test (read-only)
+-- Self-test (needs no data: the database starts empty)
 -- ---------------------------------------------------------------------
 PROMPT
-PROMPT Self-test: packaged functions
-COLUMN fare       FORMAT 999,990.00
-COLUMN seats_left FORMAT 99  HEADING 'SEATS|LEFT'
-SELECT reservation_pkg.seats_left(2)                       AS seats_left,
-       reservation_pkg.calculate_fare(2, 'BUSINESS')       AS fare,
-       reservation_pkg.refund_percentage(30)               AS refund_at_30h
+PROMPT Self-test: reservation_pkg.refund_percentage
+SELECT reservation_pkg.refund_percentage(100) AS refund_at_100h,
+       reservation_pkg.refund_percentage(30)  AS refund_at_30h
   FROM dual;
-CLEAR COLUMNS
-
-PROMPT
-PROMPT Self-test: reservation_pkg.show_passenger_bookings(2)
-EXEC reservation_pkg.show_passenger_bookings(2)

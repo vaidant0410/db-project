@@ -26,9 +26,10 @@
 --                 under 0.90) do not fly routes longer than 5,000 km.
 --   * base fare : (1,500 + 4.8 INR per km) x airline fare_factor,
 --                 +/- up to 15 %, rounded to 10 INR
---   * seats     : 2 business rows + 10 economy rows (+ 1 first-class
---                 row from 4,000 km); 15-80 % of them already sold
---                 through other channels, so the seat map looks real
+--   * seats     : 1 first-class row (2 from 4,000 km) + 2 business rows
+--                 + 10 economy rows; 15-80 % of them already sold
+--                 through other channels (first class half as much),
+--                 so the seat map looks real
 --   * DBMS_RANDOM is seeded with route + date, so the same search
 --     always produces the same flights.
 --   Generated flights are committed in an autonomous transaction: they
@@ -69,6 +70,13 @@ CREATE OR REPLACE PACKAGE flight_search_pkg AS
   FUNCTION distance_km (
     p_from IN airports.iata_code%TYPE,
     p_to   IN airports.iata_code%TYPE
+  ) RETURN NUMBER;
+
+  -- lowest base fare ensure_flights could ever quote on a route. Read-only:
+  -- it lets a page show "from INR x" without creating any flights.
+  FUNCTION fare_from (
+    p_origin IN airports.iata_code%TYPE,
+    p_dest   IN airports.iata_code%TYPE
   ) RETURN NUMBER;
 
   -- make sure the route has flights on that day (generates them if not)
@@ -169,7 +177,7 @@ CREATE OR REPLACE PACKAGE BODY flight_search_pkg AS
   c_taxi_minutes  CONSTANT NUMBER      := 30;
   c_fare_fixed    CONSTANT NUMBER      := 1500; -- INR
   c_fare_per_km   CONSTANT NUMBER      := 4.8;  -- INR
-  c_first_from_km CONSTANT NUMBER      := 4000; -- long-haul flights get a first-class row
+  c_first_from_km CONSTANT NUMBER      := 4000; -- long-haul flights get a second first-class row
   c_lcc_max_km    CONSTANT NUMBER      := 5000; -- low-cost carriers stay below this
   c_lcc_factor    CONSTANT NUMBER      := 0.90; -- fare_factor below this = low-cost
 
@@ -207,23 +215,61 @@ CREATE OR REPLACE PACKAGE BODY flight_search_pkg AS
     RETURN ROUND(haversine(v_a.latitude, v_a.longitude, v_b.latitude, v_b.longitude));
   END distance_km;
 
+  FUNCTION fare_from (
+    p_origin IN airports.iata_code%TYPE,
+    p_dest   IN airports.iata_code%TYPE
+  ) RETURN NUMBER IS
+    v_o      airports%ROWTYPE := airport_row(p_origin);
+    v_d      airports%ROWTYPE := airport_row(p_dest);
+    v_km     NUMBER;
+    v_factor airlines.fare_factor%TYPE;
+  BEGIN
+    IF v_o.airport_id = v_d.airport_id THEN
+      RETURN NULL;
+    END IF;
+    v_km := haversine(v_o.latitude, v_o.longitude, v_d.latitude, v_d.longitude);
+
+    -- cheapest airline allowed on the route (same rules as ensure_flights)
+    IF v_o.country = v_d.country THEN
+      SELECT MIN(fare_factor) INTO v_factor
+        FROM airlines
+       WHERE country = v_o.country
+         AND (v_km <= c_lcc_max_km OR fare_factor >= c_lcc_factor);
+    ELSE
+      SELECT MIN(fare_factor) INTO v_factor
+        FROM airlines
+       WHERE (network <> 'DOMESTIC' AND country IN (v_o.country, v_d.country)
+              AND (v_km <= c_lcc_max_km OR fare_factor >= c_lcc_factor))
+          OR (network = 'GLOBAL' AND country NOT IN (v_o.country, v_d.country));
+    END IF;
+    IF v_factor IS NULL THEN
+      SELECT MIN(fare_factor) INTO v_factor FROM airlines WHERE network = 'GLOBAL';
+    END IF;
+
+    -- 0.85 = the lowest end of the +/- 15 % spread in ensure_flights
+    RETURN ROUND((c_fare_fixed + v_km * c_fare_per_km) * v_factor * 0.85, -1);
+  END fare_from;
+
   -- seat inventory for a new flight; some seats are already sold
   PROCEDURE add_seats (p_flight_id IN flights.flight_id%TYPE, p_km IN NUMBER) IS
     v_row  PLS_INTEGER := 0;
     v_sold NUMBER      := DBMS_RANDOM.VALUE(0.15, 0.80);
 
-    PROCEDURE add_row (p_class IN VARCHAR2, p_letters IN VARCHAR2) IS
+    -- p_sold scales the share already sold (first class sells slower)
+    PROCEDURE add_row (p_class IN VARCHAR2, p_letters IN VARCHAR2, p_sold IN NUMBER DEFAULT 1) IS
     BEGIN
       v_row := v_row + 1;
       FOR i IN 1 .. LENGTH(p_letters) LOOP
         INSERT INTO seats (flight_id, seat_no, seat_class, status)
         VALUES (p_flight_id, v_row || SUBSTR(p_letters, i, 1), p_class,
-                CASE WHEN DBMS_RANDOM.VALUE < v_sold THEN 'BOOKED' ELSE 'AVAILABLE' END);
+                CASE WHEN DBMS_RANDOM.VALUE < v_sold * p_sold THEN 'BOOKED' ELSE 'AVAILABLE' END);
       END LOOP;
     END add_row;
   BEGIN
+    -- every flight has first class: one row of 2 seats, two rows on long-haul
+    add_row('FIRST', 'AF', 0.5);
     IF p_km >= c_first_from_km THEN
-      add_row('FIRST', 'AF');
+      add_row('FIRST', 'AF', 0.5);
     END IF;
     add_row('BUSINESS', 'ACDF');
     add_row('BUSINESS', 'ACDF');
@@ -252,7 +298,6 @@ CREATE OR REPLACE PACKAGE BODY flight_search_pkg AS
     v_fare     flights.base_fare%TYPE;
     v_no       flights.flight_no%TYPE;
     v_taken    PLS_INTEGER;
-    v_aircraft aircraft.aircraft_id%TYPE;
     v_id       flights.flight_id%TYPE;
     v_lock     airports.airport_id%TYPE;
     v_used     VARCHAR2(400) := ',';   -- airline codes already on this route today
@@ -339,21 +384,11 @@ CREATE OR REPLACE PACKAGE BODY flight_search_pkg AS
         EXIT WHEN v_taken = 0;
       END LOOP;
 
-      BEGIN
-        SELECT aircraft_id INTO v_aircraft
-          FROM (SELECT aircraft_id FROM aircraft
-                 WHERE airline_id = v_al.airline_id AND status = 'ACTIVE'
-                 ORDER BY aircraft_id)
-         WHERE ROWNUM = 1;
-      EXCEPTION
-        WHEN NO_DATA_FOUND THEN v_aircraft := NULL;
-      END;
-
       -- a slot that has already gone (searching for today) is skipped
       IF v_dep > SYSDATE + 2 / 24 THEN
-        INSERT INTO flights (flight_no, airline_id, aircraft_id, origin_airport_id, dest_airport_id,
+        INSERT INTO flights (flight_no, airline_id, origin_airport_id, dest_airport_id,
                              departure_time, arrival_time, base_fare, status)
-        VALUES (v_no, v_al.airline_id, v_aircraft, v_o.airport_id, v_d.airport_id,
+        VALUES (v_no, v_al.airline_id, v_o.airport_id, v_d.airport_id,
                 v_dep, v_dep + (v_minutes + TRUNC(DBMS_RANDOM.VALUE(-2, 3)) * 5) / 1440,
                 v_fare, CASE WHEN DBMS_RANDOM.VALUE < 0.08 THEN 'DELAYED' ELSE 'SCHEDULED' END)
         RETURNING flight_id INTO v_id;
@@ -732,48 +767,11 @@ SELECT f.flight_id,
    AND f.departure_time < SYSDATE + 7;
 
 -- ---------------------------------------------------------------------
--- Self-test: generate a route that was never scheduled, then book on it
+-- Self-test (read-only: the database starts with no flights, and this
+-- script must not create any)
 -- ---------------------------------------------------------------------
 PROMPT
-PROMPT Self-test: distance DEL -> LHR (km)
-SELECT flight_search_pkg.distance_km('DEL', 'LHR') AS del_lhr_km FROM dual;
-
-PROMPT
-PROMPT Self-test: search DEL -> LHR in 10 days, economy (flights are generated)
-VARIABLE rc REFCURSOR
-BEGIN
-  flight_search_pkg.search_flights('DEL', 'LHR', TRUNC(SYSDATE) + 10, 'ECONOMY', :rc);
-END;
-/
-COLUMN flight_no    FORMAT A8
-COLUMN airline_name FORMAT A26
-COLUMN airline_code NOPRINT
-COLUMN origin_city  NOPRINT
-COLUMN destination_city NOPRINT
-COLUMN fare         FORMAT 9,999,990
-PRINT rc
-CLEAR COLUMNS
-
-PROMPT
-PROMPT Self-test: quick_book on the first of those flights, then roll back
-DECLARE
-  v_flight  flights.flight_id%TYPE;
-  v_booking bookings.booking_id%TYPE;
-  v_seat    seats.seat_no%TYPE;
-  v_amount  payments.amount%TYPE;
-BEGIN
-  SELECT MIN(f.flight_id) INTO v_flight
-    FROM flights f
-    JOIN airports o ON o.airport_id = f.origin_airport_id
-    JOIN airports d ON d.airport_id = f.dest_airport_id
-   WHERE o.iata_code = 'DEL' AND d.iata_code = 'LHR'
-     AND f.departure_time >= TRUNC(SYSDATE) + 10 AND f.departure_time < TRUNC(SYSDATE) + 11;
-
-  SAVEPOINT sp_selftest;
-  flight_search_pkg.quick_book('Test', 'Traveller', 'test.traveller@example.com', '+44 20 7946 0000',
-                               v_flight, 'ECONOMY', NULL, 'CARD', v_booking, v_seat, v_amount);
-  DBMS_OUTPUT.PUT_LINE('quick_book -> booking ' || v_booking || ', seat ' || v_seat ||
-                       ', paid INR ' || TO_CHAR(v_amount, 'FM999,999,990.00'));
-  ROLLBACK TO SAVEPOINT sp_selftest;
-END;
-/
+PROMPT Self-test: distance and lowest possible fare, DEL -> LHR
+SELECT flight_search_pkg.distance_km('DEL', 'LHR') AS del_lhr_km,
+       flight_search_pkg.fare_from('DEL', 'LHR')   AS fare_from_inr
+  FROM dual;

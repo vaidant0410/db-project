@@ -324,9 +324,12 @@ END show_passenger_bookings;
 SHOW ERRORS
 
 -- ---------------------------------------------------------------------
--- Self-test (read-only): passenger 1 has one confirmed and one cancelled
--- booking in the seed data.
+-- Check that everything compiled (the database starts with no bookings,
+-- so the procedures are exercised by the first real booking)
 -- ---------------------------------------------------------------------
 PROMPT
-PROMPT Self-test: show_passenger_bookings(1)
-EXEC show_passenger_bookings(1)
+PROMPT Procedures installed:
+COLUMN object_name FORMAT A28
+COLUMN status      FORMAT A8
+SELECT object_name, status FROM user_objects WHERE object_type = 'PROCEDURE' ORDER BY object_name;
+CLEAR COLUMNS

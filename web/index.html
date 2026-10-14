@@ -219,7 +219,7 @@
   <!-- ═══════════════ 4 · hot destinations ═══════════════ -->
   <section data-tab="destinations" hidden>
     <div class="sortbar">
-      <span>fares from <span class="amber" id="dest-origin">DEL</span>, a week from today · pick one to see its flights</span>
+      <span>lowest fares from <span class="amber" id="dest-origin">DEL</span> · pick one to see its flights</span>
     </div>
     <div class="grid g-3" id="dests"></div>
   </section>
@@ -604,6 +604,12 @@ async function loadDepartures() {
   let rows;
   try { rows = await api('/departures?limit=14'); }
   catch (e) { $('board').innerHTML = `<span class="red">${esc(e.message)}</span>`; boardLoaded = false; return; }
+  if (!rows.length) {
+    $('board').innerHTML = '<span class="dim">no departures in the next 7 days yet. flights are scheduled when someone searches a route.</span>';
+    $('ticker').setAttribute('options', JSON.stringify({ text: 'no departures yet · search a route to schedule flights · ', speed: 10 }));
+    TUI.draw($('board').closest('.tui'));
+    return;
+  }
   const status = s => s === 'DELAYED' ? 'delayed' : s === 'CANCELLED' ? 'cancelled' : 'on time';
   $('board').innerHTML =
     `<div class="board-row head">${COLS.map(([h, n]) => `<span>${flap(h, n, true)}</span>`).join('')}</div>` +
