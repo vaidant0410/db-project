@@ -198,16 +198,23 @@ app.post('/api/bookings/:id/cancel', route(async (req, res) => {
   res.json({ refund });
 }));
 
-// the departures board: the last hour's departures, then what leaves next
+// the departures board of one airport for today: the last hour's departures,
+// then the rest of the day (ensure_departures schedules the day if needed)
 app.get('/api/departures', route(async (req, res) => {
+  const from = String(req.query.from || 'DEL').toUpperCase();
   const limit = Math.min(Number(req.query.limit) || 14, 50);
-  const rows = await db(c => c.execute(
-    `SELECT flight_no, airline_name, origin, origin_city, destination, destination_city,
-            departure_time, board_status AS status
-       FROM departures_board
-      ORDER BY departure_time
-      FETCH FIRST :n ROWS ONLY`, { n: limit }));
-  res.json(rows.rows.map(camel));
+  const rows = await db(async c => {
+    await c.execute(`BEGIN flight_search_pkg.ensure_departures(:o, TRUNC(SYSDATE)); END;`, { o: from });
+    return (await c.execute(
+      `SELECT flight_no, airline_name, origin, origin_city, destination, destination_city,
+              departure_time, board_status AS status
+         FROM departures_board
+        WHERE origin = :o
+          AND departure_time < TRUNC(SYSDATE) + 1
+        ORDER BY departure_time
+        FETCH FIRST :n ROWS ONLY`, { o: from, n: limit })).rows;
+  });
+  res.json(rows.map(camel));
 }));
 
 // lowest possible fare per destination, for the destination cards.

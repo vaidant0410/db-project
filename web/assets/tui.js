@@ -184,7 +184,8 @@ function nearestAirport() {
 }
 
 // ═════════ airline logos ═════════
-// A pixel banner of the airline code in a colour close to its livery;
+// A pixel banner of the airline code in a colour close to its livery, with
+// the same left-to-right glint as the other banners;
 // airlines without one get a colour derived from their code.
 const BRAND = {
   AI: '#e8352f', '6E': '#5b7cfa', SG: '#f0473c', QP: '#ff7a1a', IX: '#f26b38', '9I': '#e0566b', S5: '#3fa9f5',
@@ -205,7 +206,7 @@ function brandColor(code) {
 const shade = c => hex(...[1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16) * 0.72));
 const airlineLogo = code => {
   const c = brandColor(code);
-  return `<ascii-banner text="${esc(code)}" color="${c},${shade(c)}" shadow="rounded" effect="still" label="${esc(code)} logo"></ascii-banner>`;
+  return `<ascii-banner text="${esc(code)}" color="${c},${shade(c)}" shadow="rounded" effect="glint" label="${esc(code)} logo"></ascii-banner>`;
 };
 
 // ═════════ tabs ═════════

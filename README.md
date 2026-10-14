@@ -176,7 +176,7 @@ The API reads `DB_USER`, `DB_PASSWORD`, `DB_CONNECT` and `PORT` from the environ
 | `POST /api/bookings/round-trip` `{firstName, lastName, email, phone, method, legs: [2 x {flightId, seatClass, seatNo?}]}` | `flight_search_pkg.quick_book_round_trip`, then `COMMIT` |
 | `POST /api/bookings/:id/cancel` `{email}` | `flight_search_pkg.cancel_my_booking`, then `COMMIT` |
 | `POST /api/profile` `{email, phone}` | `flight_search_pkg.my_bookings` (all past and future bookings of that e-mail) |
-| `GET /api/departures?limit=14` | `departures_board` view |
+| `GET /api/departures?from=DEL&limit=14` | `flight_search_pkg.ensure_departures` (schedules the airport's day if needed), then the `departures_board` view: that airport, today |
 | `GET /api/fares/from/:origin?to=BOM,DXB` | `flight_search_pkg.fare_from`: lowest possible fare per destination (read-only, creates no flights) |
 
 Errors raised by the packages (`ORA-20xxx`) come back as JSON `{error, code}` with a matching HTTP status
@@ -263,6 +263,10 @@ airlines  = domestic route: the airlines of that country
 base fare = (1,500 + 4.8 INR per km) x airline fare_factor x 0.85-1.15, rounded to 10 INR
 seats     = 15-80 % already sold through other channels (first class half as much)
 ```
+
+**Departures board** — `flight_search_pkg.ensure_departures(airport, day)` runs `ensure_flights` for the airport's
+main routes: up to 5 domestic airports more than 150 km away and the 3 nearest international hubs. The website
+calls it for the visitor's nearest airport when the departures tab opens, so the board shows that airport's day.
 
 `DBMS_RANDOM` is seeded with route + date, so the same search always gives the same flights. Generated flights
 are written in an autonomous transaction (they are timetable data and stay even if the caller rolls back), and a

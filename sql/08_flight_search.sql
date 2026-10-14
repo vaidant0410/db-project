@@ -7,6 +7,9 @@
 --   search_flights    the flights for a route, date and class. The first
 --                     search for a route and day generates 4-7 flights
 --                     (ensure_flights), so every search has options.
+--   ensure_departures the day's flights out of an airport, for the
+--                     departures board: its main domestic routes and
+--                     nearest international hubs
 --   seat_map          every seat on a flight with its class, state, fare
 --   quick_book        book with just name, e-mail and phone: the
 --                     passenger is found or created, a seat is picked if
@@ -83,6 +86,13 @@ CREATE OR REPLACE PACKAGE flight_search_pkg AS
   PROCEDURE ensure_flights (
     p_origin IN airports.iata_code%TYPE,
     p_dest   IN airports.iata_code%TYPE,
+    p_date   IN DATE
+  );
+
+  -- make sure an airport has departures on a day: ensure_flights to its
+  -- main domestic airports and its nearest international hubs
+  PROCEDURE ensure_departures (
+    p_origin IN airports.iata_code%TYPE,
     p_date   IN DATE
   );
 
@@ -180,6 +190,9 @@ CREATE OR REPLACE PACKAGE BODY flight_search_pkg AS
   c_first_from_km CONSTANT NUMBER      := 4000; -- long-haul flights get a second first-class row
   c_lcc_max_km    CONSTANT NUMBER      := 5000; -- low-cost carriers stay below this
   c_lcc_factor    CONSTANT NUMBER      := 0.90; -- fare_factor below this = low-cost
+  c_board_domestic      CONSTANT PLS_INTEGER := 5;   -- routes ensure_departures fills
+  c_board_international CONSTANT PLS_INTEGER := 3;
+  c_board_min_km        CONSTANT NUMBER      := 150; -- closer airports serve the same city
 
   TYPE t_airlines IS TABLE OF airlines%ROWTYPE;
 
@@ -403,6 +416,35 @@ CREATE OR REPLACE PACKAGE BODY flight_search_pkg AS
       ROLLBACK;            -- an autonomous transaction must end before it returns
       RAISE;
   END ensure_flights;
+
+  PROCEDURE ensure_departures (
+    p_origin IN airports.iata_code%TYPE,
+    p_date   IN DATE
+  ) IS
+    v_o airports%ROWTYPE := airport_row(p_origin);
+  BEGIN
+    FOR d IN (
+      -- the first airports of its own country in the reference data (the
+      -- main ones), skipping any in the same metro area
+      SELECT iata_code FROM (
+        SELECT iata_code FROM airports
+         WHERE country = v_o.country
+           AND airport_id <> v_o.airport_id
+           AND flight_search_pkg.distance_km(v_o.iata_code, iata_code) > c_board_min_km
+         ORDER BY airport_id)
+       WHERE ROWNUM <= c_board_domestic
+      UNION ALL
+      -- and the nearest international hubs
+      SELECT iata_code FROM (
+        SELECT iata_code FROM airports
+         WHERE country <> v_o.country
+           AND iata_code IN ('DXB', 'DOH', 'SIN', 'LHR', 'IST', 'FRA', 'CDG', 'HKG', 'BKK', 'JFK', 'NRT', 'SYD')
+         ORDER BY flight_search_pkg.distance_km(v_o.iata_code, iata_code))
+       WHERE ROWNUM <= c_board_international
+    ) LOOP
+      ensure_flights(v_o.iata_code, d.iata_code, p_date);
+    END LOOP;
+  END ensure_departures;
 
   PROCEDURE search_flights (
     p_origin  IN  airports.iata_code%TYPE,

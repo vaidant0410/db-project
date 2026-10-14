@@ -211,7 +211,7 @@
     <div class="tui panel-gap" id="ticker-box" data-title="live status" data-foot="next departures">
       <ascii-art id="ticker" piece="marquee" style="font-size: 9px"></ascii-art>
     </div>
-    <div class="tui panel-gap" data-title="departures board" data-foot="last hour and next 24 hours · all airports">
+    <div class="tui panel-gap" data-title="departures" data-foot="the last hour and the rest of today">
       <ascii-banner text="DEPARTURES" color="#f5a623,#ff6a3d" shadow="rounded" style="max-width: 640px; margin-bottom: 1.25em"></ascii-banner>
       <div class="board" id="board"><span class="dim">loading…</span></div>
     </div>
@@ -604,15 +604,22 @@ function spin(tiles) {
   };
   step();
 }
+// today's departures from the visitor's airport (the nearest one, or DEL)
 async function loadDepartures() {
   boardLoaded = true;
+  const home = state.home, city = AIRPORTS.find(x => x.code === home).city.toLowerCase();
+  const box = $('board').closest('.tui');
+  box.dataset.title = `departures · ${city} (${home}) · today`;
+  TUI.draw(box);
+  const stop = spinner($('board'), `loading today's departures from ${city}…`);
   let rows;
-  try { rows = await api('/departures?limit=14'); }
-  catch (e) { $('board').innerHTML = `<span class="red">${esc(e.message)}</span>`; boardLoaded = false; return; }
+  try { rows = await api(`/departures?from=${home}&limit=14`); stop(); }
+  catch (e) { stop(); $('board').innerHTML = `<span class="red">${esc(e.message)}</span>`; boardLoaded = false; return; }
+  if (home !== state.home) return;                          // the airport changed meanwhile
   if (!rows.length) {
-    $('board').innerHTML = '<span class="dim">no departures in the next 24 hours. flights are scheduled when someone searches a route.</span>';
-    $('ticker').setAttribute('options', JSON.stringify({ text: 'no departures yet · search a route to schedule flights · ', speed: 10 }));
-    TUI.draw($('board').closest('.tui'));
+    $('board').innerHTML = `<span class="dim">no more departures from ${esc(city)} today.</span>`;
+    $('ticker').setAttribute('options', JSON.stringify({ text: `no more departures from ${city} today · `, speed: 10 }));
+    TUI.draw(box);
     return;
   }
   const status = s => ({ DELAYED: 'delayed', CANCELLED: 'cancelled', BOARDING: 'boarding', DEPARTED: 'departed' })[s] || 'on time';
@@ -856,6 +863,7 @@ $('p-out').onclick = () => {
     $('q-near').textContent = $('near').textContent = `nearest airport: ${a.city.toLowerCase()}`;
     faresFor = null;
     if (location.hash === '#destinations') loadDestFares();
+    if (location.hash === '#departures') loadDepartures(); else boardLoaded = false;
   }
 })();
 </script>
